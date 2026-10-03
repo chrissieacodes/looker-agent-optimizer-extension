@@ -46,7 +46,7 @@ const Root = () => {
   )
 }
 
-window.addEventListener('DOMContentLoaded', () => {
+const mount = () => {
   let container = document.getElementById('extension-root')
   if (!container) {
     container = document.createElement('div')
@@ -56,4 +56,10 @@ window.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(container)
   }
   ReactDOM.render(<Root />, container)
-})
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', mount)
+} else {
+  mount()
+}
