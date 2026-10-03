@@ -27,6 +27,7 @@ application: agent_optimizer {
     use_embeds: yes
     use_form_submit: yes
     use_clipboard: yes
+    local_storage: yes
     navigation: yes
     new_window: yes
     scoped_user_attributes: []

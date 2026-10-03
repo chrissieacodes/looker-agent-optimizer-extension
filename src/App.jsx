@@ -11,7 +11,7 @@ import {
 } from './services/agentService';
 
 export const App = ({ isStandalone = false }) => {
-  const { coreSDK } = useContext(ExtensionContext40);
+  const { coreSDK, extensionSDK } = useContext(ExtensionContext40);
 
   // App State
   const [agents, setAgents] = useState([]);
@@ -35,9 +35,20 @@ export const App = ({ isStandalone = false }) => {
   const [optimizationReport, setOptimizationReport] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationError, setOptimizationError] = useState('');
-  const [gcpToken, setGcpToken] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('gcp_auth_token') || '' : ''));
+  const [gcpToken, setGcpToken] = useState('');
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenSavedMsg, setTokenSavedMsg] = useState('');
+  // Load saved GCP token via Extension SDK storage
+  useEffect(() => {
+    if (extensionSDK && typeof extensionSDK.localStorageGetItem === "function") {
+      extensionSDK.localStorageGetItem("gcp_auth_token")
+        .then((val) => {
+          if (val) setGcpToken(val);
+        })
+        .catch(() => {});
+    }
+  }, [extensionSDK]);
+
 
   // Chat State
   const [conversationId, setConversationId] = useState(null);
@@ -205,7 +216,7 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      const report = await requestAgentOptimization(agentConfig, telemetryRows, gcpToken);
+      const report = await requestAgentOptimization(agentConfig, telemetryRows, gcpToken, extensionSDK);
       setOptimizationReport(report);
     } catch (err) {
       console.error('Optimization run error:', err);
@@ -758,11 +769,11 @@ export const App = ({ isStandalone = false }) => {
                       }}
                     />
                     <button
-                      onClick={() => {
-                        if (typeof localStorage !== 'undefined') {
-                          localStorage.setItem('gcp_auth_token', gcpToken.trim());
+                      onClick={async () => {
+                        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
+                          await extensionSDK.localStorageSetItem("gcp_auth_token", gcpToken.trim()).catch(() => {});
                         }
-                        setTokenSavedMsg('✓ Token saved to browser storage!');
+                        setTokenSavedMsg("✓ Token saved to Looker extension storage!");
                         setTimeout(() => setTokenSavedMsg(''), 3000);
                       }}
                       style={{
@@ -780,12 +791,12 @@ export const App = ({ isStandalone = false }) => {
                     </button>
                     {gcpToken && (
                       <button
-                        onClick={() => {
-                          setGcpToken('');
-                          if (typeof localStorage !== 'undefined') {
-                            localStorage.removeItem('gcp_auth_token');
+                        onClick={async () => {
+                          setGcpToken("");
+                          if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
+                            await extensionSDK.localStorageSetItem("gcp_auth_token", "").catch(() => {});
                           }
-                          setTokenSavedMsg('Cleared token.');
+                          setTokenSavedMsg("Cleared token.");
                           setTimeout(() => setTokenSavedMsg(''), 3000);
                         }}
                         style={{

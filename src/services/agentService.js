@@ -241,36 +241,60 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
   }
 }
 
-export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null) {
-  const token = userAuthToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('gcp_auth_token') : '') || '';
+export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null) {
+  const token = userAuthToken ? userAuthToken.trim() : "";
   const headers = {
-    'Content-Type': 'application/json'
+    "Content-Type": "application/json"
   };
   if (token) {
-    headers['Authorization'] = `Bearer ${token.trim()}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
-  // Primary: Live Cloud Run backend (Vertex AI Gemini 2.5 Flash)
-  // Secondary: Local dev server proxy /api/optimize-agent
+  const payload = {
+    agent: agentConfig,
+    telemetry: telemetryRows
+  };
+
+  const cloudRunUrl = "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent";
+
+  // 1. Looker Extension SDK fetchProxy (official Looker proxy method)
+  if (extensionSDK && typeof extensionSDK.fetchProxy === "function") {
+    try {
+      const response = await extensionSDK.fetchProxy(cloudRunUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
+      });
+      if (response && response.ok && response.body) {
+        const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
+        data.source = "Vertex AI (Cloud Run via Looker fetchProxy)";
+        return data;
+      }
+      if (response && (response.status === 401 || response.status === 403)) {
+        console.warn(`Looker fetchProxy auth required (${response.status}). Provide a GCP Identity Token.`);
+      }
+    } catch (err) {
+      console.warn("Looker fetchProxy call failed:", err);
+    }
+  }
+
+  // 2. Direct browser fetch (for local standalone testing)
   const endpoints = [
-    'https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent',
-    '/api/optimize-agent'
+    cloudRunUrl,
+    "/api/optimize-agent"
   ];
 
   for (const url of endpoints) {
     try {
       const res = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers,
-        body: JSON.stringify({
-          agent: agentConfig,
-          telemetry: telemetryRows
-        })
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
         const data = await res.json();
-        data.source = url.includes('run.app') ? 'Vertex AI (Cloud Run)' : 'Local Vertex Proxy';
+        data.source = url.includes("run.app") ? "Vertex AI (Cloud Run)" : "Local Vertex Proxy";
         return data;
       }
       if (res.status === 401 || res.status === 403) {
