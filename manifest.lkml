@@ -30,6 +30,8 @@ application: agent_optimizer {
     navigation: yes
     new_window: yes
     scoped_user_attributes: []
-    external_api_urls: []
+    external_api_urls: [
+      "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app"
+    ]
   }
 }

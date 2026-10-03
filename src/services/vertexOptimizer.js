@@ -5,6 +5,33 @@ async function getAccessToken() {
   if (process.env.GOOGLE_OAUTH_TOKEN) {
     return process.env.GOOGLE_OAUTH_TOKEN;
   }
+  // 1. Try GCP Metadata Server (automatically active on Cloud Run)
+  try {
+    const tokenFromMeta = await new Promise((resolve) => {
+      const http = require('http');
+      const req = http.get(
+        'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+        { headers: { 'Metadata-Flavor': 'Google' }, timeout: 1500 },
+        (res) => {
+          let data = '';
+          res.on('data', (c) => (data += c));
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(data).access_token);
+            } catch {
+              resolve(null);
+            }
+          });
+        }
+      );
+      req.on('error', () => resolve(null));
+    });
+    if (tokenFromMeta) return tokenFromMeta;
+  } catch (e) {
+    // Ignore and proceed to local ADC
+  }
+
+  // 2. Fallback to local gcloud CLI for development
   try {
     const token = execSync('gcloud auth application-default print-access-token', { encoding: 'utf8' }).trim();
     return token;

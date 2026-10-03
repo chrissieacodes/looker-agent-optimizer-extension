@@ -241,26 +241,44 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
   }
 }
 
-export async function requestAgentOptimization(agentConfig, telemetryRows) {
-  try {
-    const res = await fetch('/api/optimize-agent', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        agent: agentConfig,
-        telemetry: telemetryRows
-      })
-    });
+export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null) {
+  const token = userAuthToken || (typeof localStorage !== 'undefined' ? localStorage.getItem('gcp_auth_token') : '') || '';
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token.trim()}`;
+  }
 
-    if (res.ok) {
-      return await res.json();
+  // Primary: Live Cloud Run backend (Vertex AI Gemini 2.5 Flash)
+  // Secondary: Local dev server proxy /api/optimize-agent
+  const endpoints = [
+    'https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent',
+    '/api/optimize-agent'
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          agent: agentConfig,
+          telemetry: telemetryRows
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        data.source = url.includes('run.app') ? 'Vertex AI (Cloud Run)' : 'Local Vertex Proxy';
+        return data;
+      }
+      if (res.status === 401 || res.status === 403) {
+        console.warn(`Auth required for ${url} (${res.status}). Provide a GCP Identity Token.`);
+      }
+    } catch (err) {
+      console.warn(`Call to ${url} failed:`, err);
     }
-    const errText = await res.text();
-    console.warn('/api/optimize-agent returned status:', res.status, errText);
-  } catch (err) {
-    console.warn('Network call to /api/optimize-agent failed, falling back:', err);
   }
 
   // Graceful fallback heuristic if backend API endpoint is temporarily unreachable

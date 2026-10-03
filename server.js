@@ -39,7 +39,7 @@ app.post('/api/optimize-agent', async (req, res) => {
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Fallback to index.html for SPA routing
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

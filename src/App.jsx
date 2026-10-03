@@ -35,6 +35,9 @@ export const App = ({ isStandalone = false }) => {
   const [optimizationReport, setOptimizationReport] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationError, setOptimizationError] = useState('');
+  const [gcpToken, setGcpToken] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('gcp_auth_token') || '' : ''));
+  const [showTokenInput, setShowTokenInput] = useState(false);
+  const [tokenSavedMsg, setTokenSavedMsg] = useState('');
 
   // Chat State
   const [conversationId, setConversationId] = useState(null);
@@ -202,7 +205,7 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      const report = await requestAgentOptimization(agentConfig, telemetryRows);
+      const report = await requestAgentOptimization(agentConfig, telemetryRows, gcpToken);
       setOptimizationReport(report);
     } catch (err) {
       console.error('Optimization run error:', err);
@@ -679,6 +682,133 @@ export const App = ({ isStandalone = false }) => {
                   </button>
                 </div>
               </div>
+
+              {/* Cloud Run Connection & Auth Bar */}
+              <div style={{
+                backgroundColor: cardBg,
+                borderRadius: '8px',
+                border: `1px solid ${border}`,
+                padding: '12px 18px',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: '13px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '16px' }}>☁️</span>
+                  <span><strong>Cloud Run Backend:</strong> <code>https://agent-optimizer-backend-ofamr32cra-uc.a.run.app</code></span>
+                  <span style={{
+                    backgroundColor: gcpToken ? '#dcfce7' : '#fef9c3',
+                    color: gcpToken ? '#166534' : '#854d0e',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    padding: '2px 8px',
+                    borderRadius: '10px'
+                  }}>
+                    {gcpToken ? '✓ Auth Token Configured' : 'domain:google.com (requires token)'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => setShowTokenInput(!showTokenInput)}
+                    style={{
+                      background: 'none',
+                      border: `1px solid ${border}`,
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      color: text
+                    }}
+                  >
+                    {showTokenInput ? 'Close Auth' : '🔑 GCP Auth Token'}
+                  </button>
+                </div>
+              </div>
+
+              {showTokenInput && (
+                <div style={{
+                  backgroundColor: cardBg,
+                  borderRadius: '8px',
+                  border: '1px solid #bfdbfe',
+                  padding: '16px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
+                    Google Cloud Identity Token for Cloud Run (Required by Corp Org Policy)
+                  </div>
+                  <p style={{ fontSize: '12px', color: muted, margin: '0 0 10px 0' }}>
+                    Generate an identity token on your terminal with: <code>gcloud auth print-identity-token</code>
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="password"
+                      placeholder="Paste identity token here (eyJhbGci...)"
+                      value={gcpToken}
+                      onChange={(e) => setGcpToken(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: `1px solid ${border}`,
+                        fontSize: '12px',
+                        backgroundColor: inputBg,
+                        color: text
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (typeof localStorage !== 'undefined') {
+                          localStorage.setItem('gcp_auth_token', gcpToken.trim());
+                        }
+                        setTokenSavedMsg('✓ Token saved to browser storage!');
+                        setTimeout(() => setTokenSavedMsg(''), 3000);
+                      }}
+                      style={{
+                        backgroundColor: primary,
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '8px 16px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Save Token
+                    </button>
+                    {gcpToken && (
+                      <button
+                        onClick={() => {
+                          setGcpToken('');
+                          if (typeof localStorage !== 'undefined') {
+                            localStorage.removeItem('gcp_auth_token');
+                          }
+                          setTokenSavedMsg('Cleared token.');
+                          setTimeout(() => setTokenSavedMsg(''), 3000);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: `1px solid ${border}`,
+                          borderRadius: '6px',
+                          padding: '8px 12px',
+                          fontSize: '12px',
+                          color: '#ef4444',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {tokenSavedMsg && (
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#16a34a', fontWeight: '500' }}>
+                      {tokenSavedMsg}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Error Message */}
               {optimizationError && (
