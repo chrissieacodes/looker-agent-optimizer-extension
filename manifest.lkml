@@ -2,13 +2,9 @@ project_name: "agent_optimizer"
 
 application: agent_optimizer {
   label: "Agent Feedback Optimizer"
-
-  # For local development with live reload:
-  #url: "http://localhost:8080/bundle.js"
-
-  # For production deployment (uncomment when uploading bundle.js directly):
+  # Use url for local development (yarn develop)
+  # url: "http://localhost:8080/bundle.js"
   file: "bundle.js"
-
   entitlements: {
     core_api_methods: [
       "me",
