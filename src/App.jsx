@@ -10,6 +10,19 @@ import {
   requestAgentOptimization
 } from './services/agentService';
 
+// Telemetry Table Column Definitions
+const TABLE_COLUMNS = [
+  { id: 'agent', label: 'Agent Name', defaultWidth: 260 },
+  { id: 'id', label: 'ID', defaultWidth: 80 },
+  { id: 'timestamp', label: 'Timestamp', defaultWidth: 160 },
+  { id: 'message', label: 'User Message', defaultWidth: 340 },
+  { id: 'success', label: 'Success', defaultWidth: 100 },
+  { id: 'health', label: 'Health', defaultWidth: 100 },
+  { id: 'rating', label: 'Rating', defaultWidth: 110 },
+  { id: 'latency', label: 'Latency', defaultWidth: 100 },
+  { id: 'category', label: 'Category', defaultWidth: 120 }
+];
+
 export const App = ({ isStandalone = false }) => {
   const { coreSDK, extensionSDK } = useContext(ExtensionContext40);
 
@@ -102,6 +115,52 @@ export const App = ({ isStandalone = false }) => {
   // Telemetry Rows
   const [telemetryRows, setTelemetryRows] = useState([]);
 
+  // Table Sorting & Column Widths
+  const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
+  const [columnWidths, setColumnWidths] = useState({
+    agent: 260,
+    id: 80,
+    timestamp: 160,
+    message: 340,
+    success: 100,
+    health: 100,
+    rating: 110,
+    latency: 100,
+    category: 120
+  });
+
+  const handleResizeMouseDown = (e, colId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = columnWidths[colId] || 150;
+
+    const onMouseMove = (moveEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      setColumnWidths(prev => ({
+        ...prev,
+        [colId]: Math.max(70, startWidth + deltaX)
+      }));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleSort = (colId) => {
+    setSortConfig(prev => {
+      if (prev.key === colId) {
+        return { key: colId, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key: colId, direction: 'asc' };
+    });
+  };
+
   // Resolve Agent display name and ID from telemetry row
   const getAgentInfo = (row) => {
     if (!row) return { displayName: 'Unknown Agent', targetId: null };
@@ -128,6 +187,63 @@ export const App = ({ isStandalone = false }) => {
     const targetId = matched?.id || guid || (numericId ? String(numericId) : null);
     return { displayName, targetId, isMatched: !!matched };
   };
+
+  // Sort telemetry rows
+  const sortedTelemetryRows = useMemo(() => {
+    if (!sortConfig.key) return telemetryRows;
+    const sorted = [...telemetryRows];
+    sorted.sort((a, b) => {
+      let valA, valB;
+      switch (sortConfig.key) {
+        case 'agent':
+          valA = getAgentInfo(a).displayName.toLowerCase();
+          valB = getAgentInfo(b).displayName.toLowerCase();
+          break;
+        case 'id':
+          valA = a['conversation.id'] || 0;
+          valB = b['conversation.id'] || 0;
+          break;
+        case 'timestamp':
+          valA = a['conversation_sa_telemetry.timestamp'] || '';
+          valB = b['conversation_sa_telemetry.timestamp'] || '';
+          break;
+        case 'message':
+          valA = (a['conversation_sa_telemetry.user_message_truncated'] || '').toLowerCase();
+          valB = (b['conversation_sa_telemetry.user_message_truncated'] || '').toLowerCase();
+          break;
+        case 'success':
+          valA = a['conversation_sa_telemetry.answer_success'] || '';
+          valB = b['conversation_sa_telemetry.answer_success'] || '';
+          break;
+        case 'health':
+          valA = a['conversation_sa_telemetry.health'] || '';
+          valB = b['conversation_sa_telemetry.health'] || '';
+          break;
+        case 'rating':
+          valA = a['conversation_sa_telemetry.rating'] || '';
+          valB = b['conversation_sa_telemetry.rating'] || '';
+          break;
+        case 'latency':
+          valA = Number(a['conversation_sa_telemetry.latency']) || 0;
+          valB = Number(b['conversation_sa_telemetry.latency']) || 0;
+          break;
+        case 'category':
+          valA = (a['conversation.category'] || '').toLowerCase();
+          valB = (b['conversation.category'] || '').toLowerCase();
+          break;
+        default:
+          return 0;
+      }
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }, [telemetryRows, sortConfig, agents]);
+
+  const totalTableWidth = useMemo(() => {
+    return Object.values(columnWidths).reduce((acc, w) => acc + w, 0);
+  }, [columnWidths]);
 
   // Distinct agents breakdown from current telemetry rows
   const agentFeedbackCounts = useMemo(() => {
@@ -487,7 +603,7 @@ export const App = ({ isStandalone = false }) => {
               <div>
                 <span style={{ fontWeight: '700', fontSize: '15px' }}>Live Telemetry & Conversation Feedback</span>
                 <span style={{ fontSize: '12px', color: muted, marginLeft: '8px' }}>
-                  ({telemetryRows.length} recent queries)
+                  ({sortedTelemetryRows.length} recent queries &bull; Click headers to sort &bull; Drag column dividers to resize)
                 </span>
               </div>
               {selectedAgentId !== 'All' && (
@@ -509,94 +625,73 @@ export const App = ({ isStandalone = false }) => {
               )}
             </div>
 
-            {/* Quick Agent Feedback Filter Chips */}
-            {agentFeedbackCounts.length > 0 && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '8px',
-                padding: '12px 20px',
-                borderBottom: `1px solid ${border}`,
-                backgroundColor: isDarkMode ? '#172033' : '#f8fafc'
+            <div style={{ overflowX: 'auto', width: '100%' }}>
+              <table style={{
+                width: '100%',
+                minWidth: `${totalTableWidth}px`,
+                tableLayout: 'fixed',
+                borderCollapse: 'collapse',
+                textAlign: 'left',
+                fontSize: '13px'
               }}>
-                <span style={{ fontSize: '12px', fontWeight: '600', color: muted, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Agents with Feedback:
-                </span>
-                {agentFeedbackCounts.map((ag) => {
-                  const isSelected = selectedAgentId === ag.targetId;
-                  return (
-                    <button
-                      key={ag.targetId || ag.displayName}
-                      onClick={() => ag.targetId && handleSelectAgent(ag.targetId)}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '4px 12px',
-                        borderRadius: '16px',
-                        border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
-                        backgroundColor: isSelected ? (isDarkMode ? '#1e3a5f' : '#eff6ff') : cardBg,
-                        color: isSelected ? primary : text,
-                        fontSize: '12px',
-                        cursor: ag.targetId ? 'pointer' : 'default',
-                        fontWeight: isSelected ? '700' : '500',
-                        transition: 'all 0.15s ease'
-                      }}
-                      title={ag.targetId ? `Click to filter and view ${ag.displayName}` : ''}
-                    >
-                      <span style={{
-                        width: '8px',
-                        height: '8px',
-                        borderRadius: '50%',
-                        backgroundColor: ag.negativeCount > 0 ? '#ef4444' : '#16a34a'
-                      }}></span>
-                      <span>🤖 {ag.displayName}</span>
-                      <span style={{
-                        backgroundColor: isDarkMode ? '#334155' : '#e2e8f0',
-                        color: muted,
-                        padding: '1px 6px',
-                        borderRadius: '10px',
-                        fontSize: '11px',
-                        fontWeight: '600'
-                      }}>
-                        {ag.count}
-                      </span>
-                      {ag.negativeCount > 0 && (
-                        <span style={{
-                          backgroundColor: '#fee2e2',
-                          color: '#b91c1c',
-                          padding: '1px 6px',
-                          borderRadius: '10px',
-                          fontSize: '11px',
-                          fontWeight: '700'
-                        }}>
-                          {ag.negativeCount} ⚠️
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f1f5f9', color: muted }}>
                   <tr>
-                    <th style={{ padding: '12px 16px' }}>Agent Name</th>
-                    <th style={{ padding: '12px 16px' }}>ID</th>
-                    <th style={{ padding: '12px 16px' }}>Timestamp</th>
-                    <th style={{ padding: '12px 16px' }}>User Message</th>
-                    <th style={{ padding: '12px 16px' }}>Success</th>
-                    <th style={{ padding: '12px 16px' }}>Health</th>
-                    <th style={{ padding: '12px 16px' }}>Rating</th>
-                    <th style={{ padding: '12px 16px' }}>Latency</th>
-                    <th style={{ padding: '12px 16px' }}>Category</th>
+                    {TABLE_COLUMNS.map(col => {
+                      const isSorted = sortConfig.key === col.id;
+                      const sortIcon = isSorted ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : ' ↕';
+                      return (
+                        <th
+                          key={col.id}
+                          onClick={() => handleSort(col.id)}
+                          style={{
+                            width: `${columnWidths[col.id]}px`,
+                            minWidth: `${columnWidths[col.id]}px`,
+                            maxWidth: `${columnWidths[col.id]}px`,
+                            padding: '12px 16px',
+                            position: 'relative',
+                            userSelect: 'none',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            boxSizing: 'border-box'
+                          }}
+                          title={`Click to sort by ${col.label}`}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px' }}>
+                            <span style={{ fontWeight: isSorted ? '700' : '600', color: isSorted ? primary : 'inherit' }}>
+                              {col.label}
+                            </span>
+                            <span style={{ fontSize: '11px', color: isSorted ? primary : muted, opacity: isSorted ? 1 : 0.4 }}>
+                              {sortIcon}
+                            </span>
+                          </div>
+
+                          {/* Interactive Resize Handle */}
+                          <div
+                            onMouseDown={(e) => handleResizeMouseDown(e, col.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              position: 'absolute',
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: '10px',
+                              cursor: 'col-resize',
+                              zIndex: 10,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                            title="Drag to resize column"
+                          >
+                            <div style={{ width: '2px', height: '60%', backgroundColor: isDarkMode ? '#475569' : '#cbd5e1' }} />
+                          </div>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
-                  {telemetryRows.map((r, idx) => {
+                  {sortedTelemetryRows.map((r, idx) => {
                     const { displayName, targetId } = getAgentInfo(r);
                     const isSuccess = r['conversation_sa_telemetry.answer_success'] === 'Yes' ||
                       r['conversation_sa_telemetry.answer_success'] === 'Success' ||
@@ -606,7 +701,16 @@ export const App = ({ isStandalone = false }) => {
 
                     return (
                       <tr key={idx} style={{ borderBottom: `1px solid ${border}` }}>
-                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                        {/* Agent Name */}
+                        <td style={{
+                          width: `${columnWidths.agent}px`,
+                          maxWidth: `${columnWidths.agent}px`,
+                          padding: '12px 16px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }} title={displayName}>
                           <button
                             onClick={() => targetId && handleSelectAgent(targetId)}
                             style={{
@@ -620,25 +724,89 @@ export const App = ({ isStandalone = false }) => {
                               textAlign: 'left',
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: '6px'
+                              gap: '6px',
+                              maxWidth: '100%',
+                              overflow: 'hidden'
                             }}
-                            title={targetId ? `Click to select and configure ${displayName}` : ''}
+                            title={targetId ? `Click to select and configure ${displayName}` : displayName}
                           >
-                            <span>🤖</span>
-                            <span style={{ textDecoration: targetId ? 'underline' : 'none' }}>
+                            <span style={{ flexShrink: 0 }}>🤖</span>
+                            <span style={{
+                              textDecoration: targetId ? 'underline' : 'none',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}>
                               {displayName}
                             </span>
                           </button>
                         </td>
-                        <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>{r['conversation.id'] || idx + 1000}</td>
-                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>{r['conversation_sa_telemetry.timestamp'] || '2026-10-03'}</td>
-                        <td style={{ padding: '12px 16px', maxWidth: '300px' }}>{r['conversation_sa_telemetry.user_message_truncated'] || 'N/A'}</td>
-                        <td style={{ padding: '12px 16px' }}>
+
+                        {/* ID */}
+                        <td style={{
+                          width: `${columnWidths.id}px`,
+                          maxWidth: `${columnWidths.id}px`,
+                          padding: '12px 16px',
+                          fontFamily: 'monospace',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }}>
+                          {r['conversation.id'] || idx + 1000}
+                        </td>
+
+                        {/* Timestamp */}
+                        <td style={{
+                          width: `${columnWidths.timestamp}px`,
+                          maxWidth: `${columnWidths.timestamp}px`,
+                          padding: '12px 16px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          boxSizing: 'border-box'
+                        }} title={r['conversation_sa_telemetry.timestamp'] || ''}>
+                          {r['conversation_sa_telemetry.timestamp'] || '2026-10-03'}
+                        </td>
+
+                        {/* User Message */}
+                        <td style={{
+                          width: `${columnWidths.message}px`,
+                          maxWidth: `${columnWidths.message}px`,
+                          padding: '12px 16px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }} title={r['conversation_sa_telemetry.user_message_truncated'] || ''}>
+                          {r['conversation_sa_telemetry.user_message_truncated'] || 'N/A'}
+                        </td>
+
+                        {/* Success */}
+                        <td style={{
+                          width: `${columnWidths.success}px`,
+                          maxWidth: `${columnWidths.success}px`,
+                          padding: '12px 16px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }}>
                           <span style={{ color: isSuccess ? '#16a34a' : '#ef4444', fontWeight: '600' }}>
                             {r['conversation_sa_telemetry.answer_success'] || (isSuccess ? 'Yes' : 'No')}
                           </span>
                         </td>
-                        <td style={{ padding: '12px 16px' }}>
+
+                        {/* Health */}
+                        <td style={{
+                          width: `${columnWidths.health}px`,
+                          maxWidth: `${columnWidths.health}px`,
+                          padding: '12px 16px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }}>
                           <span style={{
                             backgroundColor: isHealthy ? '#dcfce7' : '#fee2e2',
                             color: isHealthy ? '#15803d' : '#b91c1c',
@@ -650,25 +818,56 @@ export const App = ({ isStandalone = false }) => {
                             {r['conversation_sa_telemetry.health'] || (isHealthy ? 'Healthy' : 'Degraded')}
                           </span>
                         </td>
-                        <td style={{ padding: '12px 16px' }}>
+
+                        {/* Rating */}
+                        <td style={{
+                          width: `${columnWidths.rating}px`,
+                          maxWidth: `${columnWidths.rating}px`,
+                          padding: '12px 16px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }}>
                           {r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN'
                             ? <span style={{ color: '#b91c1c', fontWeight: '600' }}>👎 Negative</span>
                             : r['conversation_sa_telemetry.rating'] === 'THUMBS_UP'
                             ? <span style={{ color: '#15803d', fontWeight: '600' }}>👍 Positive</span>
                             : <span style={{ color: muted }}>Unrated</span>}
                         </td>
-                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+
+                        {/* Latency */}
+                        <td style={{
+                          width: `${columnWidths.latency}px`,
+                          maxWidth: `${columnWidths.latency}px`,
+                          padding: '12px 16px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          boxSizing: 'border-box'
+                        }}>
                           {r['conversation_sa_telemetry.latency'] ? `${r['conversation_sa_telemetry.latency']} ms` : '800 ms'}
                         </td>
-                        <td style={{ padding: '12px 16px' }}>{r['conversation.category'] || 'General'}</td>
+
+                        {/* Category */}
+                        <td style={{
+                          width: `${columnWidths.category}px`,
+                          maxWidth: `${columnWidths.category}px`,
+                          padding: '12px 16px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          boxSizing: 'border-box'
+                        }} title={r['conversation.category'] || ''}>
+                          {r['conversation.category'] || 'General'}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
+          </div>        </div>
       )}
 
       {/* TAB 2: Agent Details & Live Preview */}
