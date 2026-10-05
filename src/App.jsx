@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState, useMemo } from 'react';
 import { ExtensionContext40 } from '@looker/extension-sdk-react';
 import {
   fetchAgents,
@@ -101,6 +101,56 @@ export const App = ({ isStandalone = false }) => {
 
   // Telemetry Rows
   const [telemetryRows, setTelemetryRows] = useState([]);
+
+  // Resolve Agent display name and ID from telemetry row
+  const getAgentInfo = (row) => {
+    if (!row) return { displayName: 'Unknown Agent', targetId: null };
+    const guid = row['agent.guid'];
+    const numericId = row['agent.id'];
+    const rawName = row['agent.name'];
+    const formattedName = row['agent.formatted_name'];
+
+    // Try finding in loaded agents list
+    const matched = agents.find(a => 
+      (guid && String(a.id) === String(guid)) ||
+      (numericId && String(a.id) === String(numericId)) ||
+      (rawName && (a.name === rawName || a.id === rawName))
+    );
+
+    let displayName = matched?.name || formattedName || rawName;
+    if (!displayName) {
+      displayName = 'General Agent';
+    } else if (displayName.startsWith('http') && displayName.includes('-')) {
+      const parts = displayName.split('-');
+      displayName = parts.slice(1).join('-') || displayName;
+    }
+
+    const targetId = matched?.id || guid || (numericId ? String(numericId) : null);
+    return { displayName, targetId, isMatched: !!matched };
+  };
+
+  // Distinct agents breakdown from current telemetry rows
+  const agentFeedbackCounts = useMemo(() => {
+    const map = new Map();
+    telemetryRows.forEach(r => {
+      const { displayName, targetId } = getAgentInfo(r);
+      const key = targetId || displayName;
+      if (!map.has(key)) {
+        map.set(key, { displayName, targetId, count: 0, negativeCount: 0 });
+      }
+      const item = map.get(key);
+      item.count += 1;
+      if (
+        r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' ||
+        r['conversation_sa_telemetry.answer_success'] === 'No' ||
+        r['conversation_sa_telemetry.health'] === 'Degraded' ||
+        r['conversation_sa_telemetry.health'] === 'error'
+      ) {
+        item.negativeCount += 1;
+      }
+    });
+    return Array.from(map.values());
+  }, [telemetryRows, agents]);
 
   // Initial Load: Fetch real agents and telemetry
   useEffect(() => {
@@ -400,9 +450,15 @@ export const App = ({ isStandalone = false }) => {
           {/* KPI Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
-              <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Total Conversations</div>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{telemetryRows.length * 15 + 1240}</div>
-              <div style={{ fontSize: '12px', color: '#16a34a', marginTop: '4px' }}>↑ 12% vs last week</div>
+              <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Total Feedback Queries</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{telemetryRows.length}</div>
+              <div style={{ fontSize: '12px', color: '#16a34a', marginTop: '4px' }}>↑ Live System Activity</div>
+            </div>
+
+            <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
+              <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Active Agents with Telemetry</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{agentFeedbackCounts.length}</div>
+              <div style={{ fontSize: '12px', color: primary, marginTop: '4px' }}>Across Looker instance</div>
             </div>
 
             <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
@@ -426,13 +482,108 @@ export const App = ({ isStandalone = false }) => {
 
           {/* Telemetry Grid */}
           <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, overflow: 'hidden', marginBottom: '24px' }}>
-            <div style={{ padding: '16px 20px', borderBottom: `1px solid ${border}`, fontWeight: '600' }}>
-              Live Telemetry & Conversation Feedback
+            <div style={{ padding: '16px 20px', borderBottom: `1px solid ${border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <span style={{ fontWeight: '700', fontSize: '15px' }}>Live Telemetry & Conversation Feedback</span>
+                <span style={{ fontSize: '12px', color: muted, marginLeft: '8px' }}>
+                  ({telemetryRows.length} recent queries)
+                </span>
+              </div>
+              {selectedAgentId !== 'All' && (
+                <button
+                  onClick={() => handleSelectAgent('All')}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: `1px solid ${border}`,
+                    color: primary,
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    fontWeight: '600'
+                  }}
+                >
+                  ← Show All Agents
+                </button>
+              )}
             </div>
+
+            {/* Quick Agent Feedback Filter Chips */}
+            {agentFeedbackCounts.length > 0 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+                padding: '12px 20px',
+                borderBottom: `1px solid ${border}`,
+                backgroundColor: isDarkMode ? '#172033' : '#f8fafc'
+              }}>
+                <span style={{ fontSize: '12px', fontWeight: '600', color: muted, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Agents with Feedback:
+                </span>
+                {agentFeedbackCounts.map((ag) => {
+                  const isSelected = selectedAgentId === ag.targetId;
+                  return (
+                    <button
+                      key={ag.targetId || ag.displayName}
+                      onClick={() => ag.targetId && handleSelectAgent(ag.targetId)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 12px',
+                        borderRadius: '16px',
+                        border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
+                        backgroundColor: isSelected ? (isDarkMode ? '#1e3a5f' : '#eff6ff') : cardBg,
+                        color: isSelected ? primary : text,
+                        fontSize: '12px',
+                        cursor: ag.targetId ? 'pointer' : 'default',
+                        fontWeight: isSelected ? '700' : '500',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title={ag.targetId ? `Click to filter and view ${ag.displayName}` : ''}
+                    >
+                      <span style={{
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        backgroundColor: ag.negativeCount > 0 ? '#ef4444' : '#16a34a'
+                      }}></span>
+                      <span>🤖 {ag.displayName}</span>
+                      <span style={{
+                        backgroundColor: isDarkMode ? '#334155' : '#e2e8f0',
+                        color: muted,
+                        padding: '1px 6px',
+                        borderRadius: '10px',
+                        fontSize: '11px',
+                        fontWeight: '600'
+                      }}>
+                        {ag.count}
+                      </span>
+                      {ag.negativeCount > 0 && (
+                        <span style={{
+                          backgroundColor: '#fee2e2',
+                          color: '#b91c1c',
+                          padding: '1px 6px',
+                          borderRadius: '10px',
+                          fontSize: '11px',
+                          fontWeight: '700'
+                        }}>
+                          {ag.negativeCount} ⚠️
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f1f5f9', color: muted }}>
                   <tr>
+                    <th style={{ padding: '12px 16px' }}>Agent Name</th>
                     <th style={{ padding: '12px 16px' }}>ID</th>
                     <th style={{ padding: '12px 16px' }}>Timestamp</th>
                     <th style={{ padding: '12px 16px' }}>User Message</th>
@@ -444,33 +595,74 @@ export const App = ({ isStandalone = false }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {telemetryRows.map((r, idx) => (
-                    <tr key={idx} style={{ borderBottom: `1px solid ${border}` }}>
-                      <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>{r['conversation.id'] || idx + 1000}</td>
-                      <td style={{ padding: '12px 16px' }}>{r['conversation_sa_telemetry.timestamp'] || '2026-10-03'}</td>
-                      <td style={{ padding: '12px 16px', maxWidth: '300px' }}>{r['conversation_sa_telemetry.user_message_truncated'] || 'N/A'}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ color: r['conversation_sa_telemetry.answer_success'] === 'Yes' ? '#16a34a' : '#ef4444' }}>
-                          {r['conversation_sa_telemetry.answer_success'] || 'Yes'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{
-                          backgroundColor: r['conversation_sa_telemetry.health'] === 'Healthy' ? '#dcfce7' : '#fee2e2',
-                          color: r['conversation_sa_telemetry.health'] === 'Healthy' ? '#15803d' : '#b91c1c',
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          fontWeight: '600',
-                          fontSize: '11px'
-                        }}>
-                          {r['conversation_sa_telemetry.health'] || 'Healthy'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>{r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' ? '👎 Negative' : '👍 Positive'}</td>
-                      <td style={{ padding: '12px 16px' }}>{r['conversation_sa_telemetry.latency'] || 800} ms</td>
-                      <td style={{ padding: '12px 16px' }}>{r['conversation.category'] || 'General'}</td>
-                    </tr>
-                  ))}
+                  {telemetryRows.map((r, idx) => {
+                    const { displayName, targetId } = getAgentInfo(r);
+                    const isSuccess = r['conversation_sa_telemetry.answer_success'] === 'Yes' ||
+                      r['conversation_sa_telemetry.answer_success'] === 'Success' ||
+                      r['conversation_sa_telemetry.answer_success'] === true;
+                    const isHealthy = r['conversation_sa_telemetry.health'] === 'Healthy' ||
+                      r['conversation_sa_telemetry.health'] === 'success';
+
+                    return (
+                      <tr key={idx} style={{ borderBottom: `1px solid ${border}` }}>
+                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                          <button
+                            onClick={() => targetId && handleSelectAgent(targetId)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: primary,
+                              fontWeight: '600',
+                              fontSize: '13px',
+                              cursor: targetId ? 'pointer' : 'default',
+                              textAlign: 'left',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                            title={targetId ? `Click to select and configure ${displayName}` : ''}
+                          >
+                            <span>🤖</span>
+                            <span style={{ textDecoration: targetId ? 'underline' : 'none' }}>
+                              {displayName}
+                            </span>
+                          </button>
+                        </td>
+                        <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>{r['conversation.id'] || idx + 1000}</td>
+                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>{r['conversation_sa_telemetry.timestamp'] || '2026-10-03'}</td>
+                        <td style={{ padding: '12px 16px', maxWidth: '300px' }}>{r['conversation_sa_telemetry.user_message_truncated'] || 'N/A'}</td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{ color: isSuccess ? '#16a34a' : '#ef4444', fontWeight: '600' }}>
+                            {r['conversation_sa_telemetry.answer_success'] || (isSuccess ? 'Yes' : 'No')}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span style={{
+                            backgroundColor: isHealthy ? '#dcfce7' : '#fee2e2',
+                            color: isHealthy ? '#15803d' : '#b91c1c',
+                            padding: '3px 8px',
+                            borderRadius: '4px',
+                            fontWeight: '600',
+                            fontSize: '11px'
+                          }}>
+                            {r['conversation_sa_telemetry.health'] || (isHealthy ? 'Healthy' : 'Degraded')}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          {r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN'
+                            ? <span style={{ color: '#b91c1c', fontWeight: '600' }}>👎 Negative</span>
+                            : r['conversation_sa_telemetry.rating'] === 'THUMBS_UP'
+                            ? <span style={{ color: '#15803d', fontWeight: '600' }}>👍 Positive</span>
+                            : <span style={{ color: muted }}>Unrated</span>}
+                        </td>
+                        <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                          {r['conversation_sa_telemetry.latency'] ? `${r['conversation_sa_telemetry.latency']} ms` : '800 ms'}
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>{r['conversation.category'] || 'General'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

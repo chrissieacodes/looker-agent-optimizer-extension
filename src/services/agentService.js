@@ -203,6 +203,10 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
         view: 'conversations_feedback',
         fields: [
           'conversation.id',
+          'agent.name',
+          'agent.formatted_name',
+          'agent.guid',
+          'agent.id',
           'conversation_sa_telemetry.timestamp',
           'conversation_sa_telemetry.user_message_truncated',
           'conversation_sa_telemetry.answer_success',
@@ -222,6 +226,10 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
     return [
       {
         'conversation.id': 1001,
+        'agent.name': 'Zenith Sales Forecasting',
+        'agent.formatted_name': 'Zenith Sales Forecasting',
+        'agent.guid': 'fake_zenith',
+        'agent.id': 1,
         'conversation_sa_telemetry.timestamp': '2026-10-03 04:00',
         'conversation_sa_telemetry.user_message_truncated': 'What are the predicted sales for next month?',
         'conversation_sa_telemetry.answer_success': 'Yes',
@@ -232,6 +240,10 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
       },
       {
         'conversation.id': 1002,
+        'agent.name': 'Vanguard Risk Assessor',
+        'agent.formatted_name': 'Vanguard Risk Assessor',
+        'agent.guid': 'fake_vanguard',
+        'agent.id': 2,
         'conversation_sa_telemetry.timestamp': '2026-10-03 02:15',
         'conversation_sa_telemetry.user_message_truncated': 'List transactions over $50k this quarter',
         'conversation_sa_telemetry.answer_success': 'Yes',
@@ -242,6 +254,10 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
       },
       {
         'conversation.id': 1003,
+        'agent.name': 'Titan Inventory Manager',
+        'agent.formatted_name': 'Titan Inventory Manager',
+        'agent.guid': 'fake_titan',
+        'agent.id': 3,
         'conversation_sa_telemetry.timestamp': '2026-10-02 21:40',
         'conversation_sa_telemetry.user_message_truncated': 'Why did inventory replenishment fail?',
         'conversation_sa_telemetry.answer_success': 'No',
