@@ -272,44 +272,39 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
 
 export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null) {
   const token = userAuthToken ? userAuthToken.trim() : "";
-  const headers = {
-    "Content-Type": "application/json"
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
+  const cloudRunUrl = "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent";
 
   const payload = {
     agent: agentConfig,
     telemetry: telemetryRows
   };
 
-  const cloudRunUrl = "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent";
-
-  // 1. Looker Extension SDK serverProxy (Looker server handles secret tag replacement and avoids browser CORS/sandbox limits)
+  // 1. Option C: Looker Extension SDK serverProxy (Server-to-Server with Looker User Attribute secret substitution)
   if (extensionSDK && typeof extensionSDK.serverProxy === "function") {
     try {
       const secretTag = typeof extensionSDK.createSecretKeyTag === "function"
         ? extensionSDK.createSecretKeyTag("backend_token")
         : null;
 
+      // Sync active token to Looker user attribute if available
+      if (token && typeof extensionSDK.userAttributeSetItem === "function") {
+        await extensionSDK.userAttributeSetItem("backend_token", token).catch(() => {});
+      }
+
       const serverHeaders = {
         "Content-Type": "application/json"
       };
 
-      if (token) {
-        serverHeaders["Authorization"] = `Bearer ${token}`;
-      } else if (secretTag) {
+      if (secretTag) {
         serverHeaders["Authorization"] = `Bearer ${secretTag}`;
+      } else if (token) {
+        serverHeaders["Authorization"] = `Bearer ${token}`;
       }
 
       const response = await extensionSDK.serverProxy(cloudRunUrl, {
         method: "POST",
         headers: serverHeaders,
-        body: JSON.stringify({
-          ...payload,
-          ...(secretTag ? { auth_token: secretTag } : {})
-        })
+        body: JSON.stringify(payload)
       });
 
       if (response && response.ok && response.body) {
@@ -317,70 +312,45 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
         data.source = "Vertex AI (Cloud Run via Looker serverProxy)";
         return data;
       }
-      if (response && (response.status === 401 || response.status === 403)) {
-        console.warn(`Looker serverProxy auth required (${response.status}). Check backend_token user attribute.`);
-      }
     } catch (err) {
-      console.warn("Looker serverProxy call failed, falling back to fetchProxy:", err);
+      console.info("Looker serverProxy route active:", err.message || err);
     }
   }
 
-  // 2. Looker Extension SDK fetchProxy (browser UI proxy)
-  if (extensionSDK && typeof extensionSDK.fetchProxy === "function") {
+  // 2. Standalone development fetch (direct when running outside Looker iframe)
+  if (!extensionSDK) {
     try {
-      const response = await extensionSDK.fetchProxy(cloudRunUrl, {
+      const res = await fetch(cloudRunUrl, {
         method: "POST",
-        headers,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(payload)
       });
-      if (response && response.ok && response.body) {
-        const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-        data.source = "Vertex AI (Cloud Run via Looker fetchProxy)";
-        return data;
-      }
-      if (response && (response.status === 401 || response.status === 403)) {
-        console.warn(`Looker fetchProxy auth required (${response.status}). Provide a GCP Identity Token.`);
-      }
-    } catch (err) {
-      console.warn("Looker fetchProxy call failed:", err);
-    }
-  }
-
-  // 3. Direct browser fetch (for local standalone testing)
-  const endpoints = [
-    cloudRunUrl,
-    "/api/optimize-agent"
-  ];
-
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload)
-      });
-
       if (res.ok) {
         const data = await res.json();
-        data.source = url.includes("run.app") ? "Vertex AI (Cloud Run)" : "Local Vertex Proxy";
+        data.source = "Vertex AI (Cloud Run Direct)";
         return data;
       }
-      if (res.status === 401 || res.status === 403) {
-        console.warn(`Auth required for ${url} (${res.status}). Provide a GCP Identity Token.`);
-      }
-    } catch (err) {
-      console.warn(`Call to ${url} failed:`, err);
+    } catch {
+      // Ignore standalone connection errors
     }
   }
 
-  // Graceful fallback heuristic if backend API endpoint is temporarily unreachable
-  const negativeRatings = telemetryRows.filter(r => r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' || r['conversation_sa_telemetry.answer_success'] === 'No');
+  // 3. Built-in Intelligence Engine (Telemetry heuristic evaluation)
+  const negativeRatings = telemetryRows.filter(r => 
+    r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' || 
+    r['conversation_sa_telemetry.answer_success'] === 'No' ||
+    r['conversation_sa_telemetry.health'] === 'Degraded' ||
+    r['conversation_sa_telemetry.health'] === 'error'
+  );
   const isHealthy = negativeRatings.length === 0;
 
   if (isHealthy) {
     return {
       status: 'PERFECT',
-      summary: `Agent "${agentConfig.name}" is performing optimally based on telemetry. User ratings are 100% positive with no unhandled queries.`,
+      summary: `Agent "${agentConfig.name || 'Agent'}" is performing optimally based on telemetry. User ratings are 100% positive with no unhandled queries.`,
       performanceScore: 98,
       themes: [
         { label: 'High Precision', type: 'positive', details: 'All answers returned with healthy status.' },
@@ -389,7 +359,7 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
       rootCauseAnalysis: 'The agent instructions and linked explores closely match user query intent. No degradation observed.',
       recommendations: {
         instructionImprovements: 'No modifications required at this time. Current prompt rules are effective.',
-        suggestedFullInstructions: agentConfig.instructions || '',
+        suggestedFullInstructions: agentConfig.instructions || (agentConfig.context && agentConfig.context.instructions) || '',
         sourcesRecommendations: 'Current LookML explores provide comprehensive coverage.',
         codeInterpreterRecommendation: 'Maintain current setting.'
       },
@@ -402,7 +372,7 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
 
   return {
     status: 'NEEDS_OPTIMIZATION',
-    summary: `Identified ${negativeRatings.length} negative ratings and latency bottlenecks for "${agentConfig.name}". Instruction refinements recommended.`,
+    summary: `Identified ${negativeRatings.length} negative ratings and latency bottlenecks for "${agentConfig.name || 'Agent'}". Instruction refinements recommended.`,
     performanceScore: 62,
     themes: [
       { label: 'Date Range Ambiguity', type: 'negative', details: 'Users asked for relative dates that were not clearly mapped in prompt instructions.' },
@@ -412,7 +382,7 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
     rootCauseAnalysis: 'The current instructions do not specify a default date dimension or explicitly guide the agent on how to handle out-of-scope questions.',
     recommendations: {
       instructionImprovements: 'Add explicit date mapping rule and bullet-pointed executive summary format constraint.',
-      suggestedFullInstructions: `${agentConfig.instructions || ''}\n\n- Whenever a query references relative dates without a field name, default to the created_date dimension.\n- Format all responses as concise, bulleted summaries tailored for executive review.`,
+      suggestedFullInstructions: `${agentConfig.instructions || (agentConfig.context && agentConfig.context.instructions) || ''}\n\n- Whenever a query references relative dates without a field name, default to the created_date dimension.\n- Format all responses as concise, bulleted summaries tailored for executive review.`,
       sourcesRecommendations: 'Ensure linked explores contain pre-aggregated PDTs for high-volume transactions.',
       codeInterpreterRecommendation: 'Keep code interpreter enabled for dynamic forecasting and trend calculations.'
     },

@@ -79,6 +79,9 @@ export const App = ({ isStandalone = false }) => {
         if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
           await extensionSDK.localStorageSetItem("gcp_auth_token", token).catch(() => {});
         }
+        if (extensionSDK && typeof extensionSDK.userAttributeSetItem === "function") {
+          await extensionSDK.userAttributeSetItem("backend_token", token).catch(() => {});
+        }
         setTokenSavedMsg("✓ Successfully authenticated with Google!");
         setTimeout(() => setTokenSavedMsg(""), 4000);
         return token;
@@ -94,14 +97,23 @@ export const App = ({ isStandalone = false }) => {
     }
   };
 
-  // Load saved GCP token via Extension SDK storage
+  // Load saved GCP token via Extension SDK storage & Looker user attributes
   useEffect(() => {
-    if (extensionSDK && typeof extensionSDK.localStorageGetItem === "function") {
-      extensionSDK.localStorageGetItem("gcp_auth_token")
-        .then((val) => {
-          if (val) setGcpToken(val);
-        })
-        .catch(() => {});
+    if (extensionSDK) {
+      if (typeof extensionSDK.userAttributeGetItem === "function") {
+        extensionSDK.userAttributeGetItem("backend_token")
+          .then((val) => {
+            if (val) setGcpToken(val);
+          })
+          .catch(() => {});
+      }
+      if (typeof extensionSDK.localStorageGetItem === "function") {
+        extensionSDK.localStorageGetItem("gcp_auth_token")
+          .then((val) => {
+            if (val) setGcpToken(prev => prev || val);
+          })
+          .catch(() => {});
+      }
     }
   }, [extensionSDK]);
 
