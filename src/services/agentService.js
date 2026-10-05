@@ -293,42 +293,42 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
   let lastError = null;
 
   // // 1. Google Recommendation: serverProxy (eliminates CORS preflight overhead server-to-server)
-  // if (typeof extensionSDK.serverProxy === "function") {
-  //   for (const url of endpoints) {
-  //     try {
-  //       console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.serverProxy: ${url}...`);
-  //       const serverHeaders = {
-  //         "Content-Type": "application/json"
-  //       };
-  //       if (token) {
-  //         serverHeaders["Authorization"] = `Bearer ${token}`;
-  //       } else if (secretTag) {
-  //         serverHeaders["Authorization"] = `Bearer ${secretTag}`;
-  //       }
+  if (typeof extensionSDK.serverProxy === "function") {
+    for (const url of endpoints) {
+      try {
+        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.serverProxy: ${url}...`);
+        const serverHeaders = {
+          "Content-Type": "application/json"
+        };
+        if (token) {
+          serverHeaders["Authorization"] = `Bearer ${token}`;
+        } else if (secretTag) {
+          serverHeaders["Authorization"] = `Bearer ${secretTag}`;
+        }
 
-  //       const response = await extensionSDK.serverProxy(url, {
-  //         method: "POST",
-  //         headers: serverHeaders,
-  //         body: JSON.stringify(payload)
-  //       });
+        const response = await extensionSDK.serverProxy(url, {
+          method: "POST",
+          headers: serverHeaders,
+          body: JSON.stringify(payload)
+        });
 
-  //       if (response && response.ok && response.body) {
-  //         const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-  //         data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via serverProxy)";
-  //         return data;
-  //       }
+        if (response && response.ok && response.body) {
+          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
+          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via serverProxy)";
+          return data;
+        }
 
-  //       if (response && !response.ok) {
-  //         const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-  //         console.warn(`[AgentOptimizer] serverProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-  //         lastError = new Error(`serverProxy returned HTTP ${response.status}: ${errDetail}`);
-  //       }
-  //     } catch (err) {
-  //       console.warn(`[AgentOptimizer] serverProxy to ${url} failed:`, err);
-  //       lastError = err;
-  //     }
-  //   }
-  // }
+        if (response && !response.ok) {
+          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
+          console.warn(`[AgentOptimizer] serverProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
+          lastError = new Error(`serverProxy returned HTTP ${response.status}: ${errDetail}`);
+        }
+      } catch (err) {
+        console.warn(`[AgentOptimizer] serverProxy to ${url} failed:`, err);
+        lastError = err;
+      }
+    }
+  }
 
   // 2. Fallback: fetchProxy (Looker UI proxy)
   if (typeof extensionSDK.fetchProxy === "function") {
