@@ -270,101 +270,164 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
   }
 }
 
-export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null) {
-  if (!extensionSDK) {
-    throw new Error("Looker Extension SDK is not available.");
+function extractJsonFromText(rawText) {
+  if (!rawText || typeof rawText !== "string") return null;
+
+  let cleaned = rawText.trim();
+  // Strip markdown code fences if present (e.g. ```json ... ``` or ``` ...)
+  const codeBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/i;
+  const match = cleaned.match(codeBlockRegex);
+  if (match && match[1]) {
+    cleaned = match[1].trim();
   }
 
-  const token = userAuthToken ? userAuthToken.trim() : "";
-  const secretTag = typeof extensionSDK.createSecretKeyTag === "function"
-    ? extensionSDK.createSecretKeyTag("backend_token")
-    : null;
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    const firstIdx = cleaned.indexOf("{");
+    const lastIdx = cleaned.lastIndexOf("}");
+    if (firstIdx !== -1 && lastIdx > firstIdx) {
+      const candidate = cleaned.substring(firstIdx, lastIdx + 1);
+      return JSON.parse(candidate);
+    }
+    throw new Error(`Unable to parse AI response as valid JSON: ${rawText.slice(0, 300)}...`);
+  }
+}
 
-  const payload = {
-    agent: agentConfig,
-    telemetry: telemetryRows
+function generateSimulationOptimization(agentConfig, telemetryRows) {
+  const agentName = agentConfig?.name || "Selected Agent";
+  const currentInstructions = agentConfig?.instructions || "";
+
+  return {
+    status: "NEEDS_OPTIMIZATION",
+    summary: `Autonomous evaluation for ${agentName}: Telemetry reveals user inquiries regarding date ranges and performance latency require prompt guardrails.`,
+    performanceScore: 78,
+    themes: [
+      { label: "Relative Date Ambiguity", type: "negative", details: "Users asked questions with relative terms like 'last month' that lacked explicit dimension mappings." },
+      { label: "Analytical Query Latency", type: "warning", details: "Aggregate calculation queries experienced higher latency." },
+      { label: "Formatting Consistency", type: "positive", details: "Users consistently rated structured responses positively." }
+    ],
+    rootCauseAnalysis: "The agent's current instructions do not explicitly instruct the model on default date dimensions or query limits. Adding targeted rules prevents ambiguity.",
+    recommendations: {
+      instructionImprovements: "Explicitly designate primary date dimensions, specify sorting defaults, and enforce bulleted summaries.",
+      suggestedFullInstructions: `${currentInstructions}\n\n- When users ask about relative dates, default to created_date.\n- Present answers in concise bulleted summaries for executive review.`,
+      sourcesRecommendations: "Ensure the explore contains pre-aggregated PDTs for high-volume transactions.",
+      codeInterpreterRecommendation: "Keep code interpreter enabled for trend calculations and forecasting."
+    },
+    actionPlan: [
+      "Apply suggested instructions with explicit date dimension mappings.",
+      "Verify query performance with pre-aggregated PDTs.",
+      "Test updated instructions in Live Preview chat."
+    ],
+    source: "Looker Conversational Analytics Agent (Simulation)"
   };
+}
 
-  const endpoints = [
-    "https://agent-optimizer-backend-82452831399.us-central1.run.app/api/optimize-agent",
-    "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent"
-  ];
-
-  let lastError = null;
-
-  // // 1. Google Recommendation: serverProxy (eliminates CORS preflight overhead server-to-server)
-  if (typeof extensionSDK.serverProxy === "function") {
-    for (const url of endpoints) {
-      try {
-        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.serverProxy: ${url}...`);
-        const serverHeaders = {
-          "Content-Type": "application/json"
-        };
-        if (token) {
-          serverHeaders["Authorization"] = `Bearer ${token}`;
-        } else if (secretTag) {
-          serverHeaders["Authorization"] = `Bearer ${secretTag}`;
-        }
-
-        const response = await extensionSDK.serverProxy(url, {
-          method: "POST",
-          headers: serverHeaders,
-          body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok && response.body) {
-          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via serverProxy)";
-          return data;
-        }
-
-        if (response && !response.ok) {
-          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-          console.warn(`[AgentOptimizer] serverProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-          lastError = new Error(`serverProxy returned HTTP ${response.status}: ${errDetail}`);
-        }
-      } catch (err) {
-        console.warn(`[AgentOptimizer] serverProxy to ${url} failed:`, err);
-        lastError = err;
-      }
-    }
+export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null, coreSDK = null) {
+  // Resolve coreSDK from parameters
+  let sdk = coreSDK;
+  if (!sdk && userAuthToken && typeof userAuthToken === "object" && (userAuthToken.ok || userAuthToken.search_agents || userAuthToken.create_conversation)) {
+    sdk = userAuthToken;
+  }
+  if (!sdk && extensionSDK && typeof extensionSDK === "object" && (extensionSDK.ok || extensionSDK.search_agents || extensionSDK.create_conversation)) {
+    sdk = extensionSDK;
   }
 
-  // 2. Fallback: fetchProxy (Looker UI proxy)
-  if (typeof extensionSDK.fetchProxy === "function") {
-    for (const url of endpoints) {
-      try {
-        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.fetchProxy: ${url}...`);
-        const fetchHeaders = {
-          "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
-        };
-
-        const response = await extensionSDK.fetchProxy(url, {
-          method: "POST",
-          headers: fetchHeaders,
-          body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok && response.body) {
-          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via fetchProxy)";
-          return data;
-        }
-
-        if (response && !response.ok) {
-          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-          console.warn(`[AgentOptimizer] fetchProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-          lastError = new Error(`fetchProxy returned HTTP ${response.status}: ${errDetail}`);
-        }
-      } catch (err) {
-        console.warn(`[AgentOptimizer] fetchProxy to ${url} failed:`, err);
-        lastError = err;
-      }
-    }
+  // Standalone / Mock mode handling
+  if (!sdk || (agentConfig?.id && String(agentConfig.id).startsWith("fake_"))) {
+    console.info("[AgentOptimizer] Standalone/mock agent detected. Generating simulation analysis.");
+    await new Promise(r => setTimeout(r, 600));
+    return generateSimulationOptimization(agentConfig, telemetryRows);
   }
 
-  throw lastError || new Error("Failed to reach Cloud Run Vertex AI Optimizer backend.");
+  const prompt = `You are an expert Looker Conversational Analytics & AI Agent Optimization Specialist.
+Your task is to analyze the performance, user feedback, and system activity telemetry of a Looker AI Agent and compare it with the agent's current configuration, system instructions, and linked LookML explores.
+
+AGENT CONFIGURATION:
+${JSON.stringify(agentConfig, null, 2)}
+
+TELEMETRY & USER FEEDBACK:
+${JSON.stringify(telemetryRows, null, 2)}
+
+EVALUATION GUIDELINES:
+1. Examine negative ratings (THUMBS_DOWN), answer failures, degraded health, or high latency.
+2. Determine if queries failed due to ambiguous date terms, undefined business metrics, or missing LookML explores.
+3. Compare what users actually asked vs what the agent was instructed to handle.
+4. If feedback is overwhelmingly positive (all THUMBS_UP, low latency, 100% success), set status to "PERFECT" and state no changes are needed.
+5. Otherwise, set status to "NEEDS_OPTIMIZATION" and provide specific, high-impact instruction prompt rewrites and explore suggestions.
+
+CRITICAL FORMATTING INSTRUCTION:
+You MUST reply ONLY with a raw JSON object (enclosed in { and }). Do not include markdown ticks, no preamble, and no explanation text outside the JSON.
+
+Expected JSON schema:
+{
+  "status": "NEEDS_OPTIMIZATION",
+  "summary": "Executive summary of the evaluation (1-2 sentences).",
+  "performanceScore": 82,
+  "themes": [
+    { "label": "Short Theme Name", "type": "negative", "details": "Detailed explanation..." }
+  ],
+  "rootCauseAnalysis": "Detailed analysis comparing feedback to agent instructions...",
+  "recommendations": {
+    "instructionImprovements": "Key additions or rules to add to the prompt...",
+    "suggestedFullInstructions": "Complete ready-to-use proposed text for the instructions field...",
+    "sourcesRecommendations": "Specific suggestions for linked LookML explores/models...",
+    "codeInterpreterRecommendation": "Whether code interpreter should be enabled/disabled and why."
+  },
+  "actionPlan": [
+    "Step 1...",
+    "Step 2..."
+  ]
+}`;
+
+  console.info("[AgentOptimizer] Invoking Looker Native Conversational Analytics Agent for AI optimization...");
+
+  try {
+    let targetAgentId = agentConfig.id;
+
+    // Search for a dedicated optimizer meta-agent if available
+    try {
+      if (typeof sdk.search_agents === "function") {
+        const existingAgents = await sdk.ok(sdk.search_agents({ limit: 50 }));
+        const metaAgent = existingAgents.find(a => 
+          a.name && (a.name.toLowerCase().includes("optimizer") || a.name.toLowerCase().includes("specialist"))
+        );
+        if (metaAgent) {
+          targetAgentId = metaAgent.id;
+          console.info(`[AgentOptimizer] Using dedicated meta-agent: ${metaAgent.name} (id: ${metaAgent.id})`);
+        }
+      }
+    } catch (e) {
+      console.warn("[AgentOptimizer] Agent search fallback, using selected agent:", e);
+    }
+
+    // 1. Create conversation session
+    console.info(`[AgentOptimizer] Creating analysis conversation for agent ${targetAgentId}...`);
+    const conv = await createConversation(sdk, targetAgentId, `AI Optimization Analysis - ${agentConfig.name}`);
+    const conversationId = conv.id;
+
+    // 2. Send chat message with the optimization prompt
+    console.info(`[AgentOptimizer] Sending optimization prompt to conversation ${conversationId}...`);
+    const chatResponses = await sendChatMessage(sdk, conversationId, prompt, agentConfig.name);
+
+    // 3. Extract and parse the response JSON
+    const agentReply = Array.isArray(chatResponses) 
+      ? chatResponses.map(m => m.text).join("\n") 
+      : (chatResponses?.text || JSON.stringify(chatResponses));
+
+    console.info("[AgentOptimizer] Received conversational analytics response:", agentReply);
+
+    const parsedReport = extractJsonFromText(agentReply);
+    if (!parsedReport || !parsedReport.status) {
+      throw new Error(`Invalid JSON format returned from Looker Conversational Agent: ${agentReply.slice(0, 150)}...`);
+    }
+
+    parsedReport.source = "Looker Conversational Analytics Agent (Native Gemini API)";
+    return parsedReport;
+  } catch (err) {
+    console.error("[AgentOptimizer] Native Conversational Agent optimization failed:", err);
+    throw new Error(`Looker Conversational Analytics Agent error: ${err.message || err}`);
+  }
 }
 
 export const optimizeAgent = requestAgentOptimization;
