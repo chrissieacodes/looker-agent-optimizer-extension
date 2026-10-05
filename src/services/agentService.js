@@ -186,8 +186,13 @@ export async function sendChatMessage(coreSDK, conversationId, userMessage, agen
 
 export async function runTelemetryQuery(coreSDK, agentId = null) {
   const filters = {};
-  if (agentId && agentId !== 'All' && !agentId.startsWith('fake_')) {
-    filters['agent.id'] = agentId;
+  if (agentId && agentId !== "All" && !agentId.startsWith("fake_")) {
+    // In system__activity, agent.id is a number dimension, while agent.guid is a string dimension
+    if (/^\d+$/.test(String(agentId))) {
+      filters["agent.id"] = String(agentId);
+    } else {
+      filters["agent.guid"] = String(agentId);
+    }
   }
 
   try {
