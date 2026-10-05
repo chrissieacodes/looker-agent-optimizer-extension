@@ -158,16 +158,17 @@ export async function sendChatMessage(coreSDK, conversationId, userMessage, agen
 
   try {
     let result;
+    const chatOptions = { timeout: 120000 };
     if (coreSDK.conversational_analytics_chat) {
       result = await coreSDK.ok(coreSDK.conversational_analytics_chat({
         conversation_id: conversationId,
         user_message: userMessage
-      }));
+      }, chatOptions));
     } else {
       result = await coreSDK.ok(coreSDK.post('/conversational_analytics/chat', null, {
         conversation_id: conversationId,
         user_message: userMessage
-      }));
+      }, chatOptions));
     }
 
     // Parse messages
@@ -340,14 +341,38 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
     return generateSimulationOptimization(agentConfig, telemetryRows);
   }
 
+  // Summarize telemetry to keep prompt compact and fast
+  const negativeEvents = (telemetryRows || []).filter(r => 
+    r["conversation_sa_telemetry.rating"] === "THUMBS_DOWN" || 
+    r["conversation_sa_telemetry.health"] === "Degraded" ||
+    r["conversation_sa_telemetry.answer_success"] === "No"
+  );
+  const positiveEvents = (telemetryRows || []).filter(r => r["conversation_sa_telemetry.rating"] === "THUMBS_UP");
+
+  const telemetryDigest = {
+    totalEvents: (telemetryRows || []).length,
+    positiveRatings: positiveEvents.length,
+    negativeRatings: negativeEvents.length,
+    sampleNegativeQueries: negativeEvents.slice(0, 6).map(r => ({
+      message: r["conversation_sa_telemetry.user_message_truncated"],
+      rating: r["conversation_sa_telemetry.rating"],
+      health: r["conversation_sa_telemetry.health"],
+      latency: r["conversation_sa_telemetry.latency"]
+    })),
+    sampleRecentQueries: (telemetryRows || []).slice(0, 4).map(r => ({
+      message: r["conversation_sa_telemetry.user_message_truncated"],
+      rating: r["conversation_sa_telemetry.rating"]
+    }))
+  };
+
   const prompt = `You are an expert Looker Conversational Analytics & AI Agent Optimization Specialist.
-Your task is to analyze the performance, user feedback, and system activity telemetry of a Looker AI Agent and compare it with the agent's current configuration, system instructions, and linked LookML explores.
+Analyze the performance, feedback, and telemetry for this Looker AI Agent and compare it with the agent's instructions and linked LookML explores.
 
 AGENT CONFIGURATION:
 ${JSON.stringify(agentConfig, null, 2)}
 
-TELEMETRY & USER FEEDBACK:
-${JSON.stringify(telemetryRows, null, 2)}
+TELEMETRY DIGEST:
+${JSON.stringify(telemetryDigest, null, 2)}
 
 EVALUATION GUIDELINES:
 1. Examine negative ratings (THUMBS_DOWN), answer failures, degraded health, or high latency.
