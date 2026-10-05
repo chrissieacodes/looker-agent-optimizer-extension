@@ -271,112 +271,86 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
 }
 
 export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null) {
-  // Simulate processing time for realistic autonomous analysis feel
-  await new Promise(r => setTimeout(r, 600));
-
-  const totalRows = telemetryRows.length || 1;
-  const negativeRatings = telemetryRows.filter(r => 
-    r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' || 
-    r['conversation_sa_telemetry.answer_success'] === 'No' ||
-    r['conversation_sa_telemetry.health'] === 'Degraded' ||
-    r['conversation_sa_telemetry.health'] === 'error'
-  );
-  
-  const highLatencyRows = telemetryRows.filter(r => {
-    const lat = Number(r['conversation_sa_telemetry.latency']);
-    return lat && lat > 1500;
-  });
-
-  const avgLatency = Math.round(
-    telemetryRows.reduce((sum, r) => sum + (Number(r['conversation_sa_telemetry.latency']) || 800), 0) / totalRows
-  );
-
-  const failureRate = Math.round((negativeRatings.length / totalRows) * 100);
-  const performanceScore = Math.max(30, Math.min(98, 100 - failureRate * 2 - (avgLatency > 2000 ? 15 : avgLatency > 1200 ? 8 : 0)));
-
-  const isHealthy = negativeRatings.length === 0;
-  const agentName = agentConfig.name || 'Agent';
-  const existingInstructions = agentConfig.instructions || (agentConfig.context && agentConfig.context.instructions) || '';
-
-  // Extract sample problematic queries
-  const sampleProblems = negativeRatings.slice(0, 3).map(r => 
-    r['conversation_sa_telemetry.user_message_truncated'] || 'Complex analytical query'
-  );
-
-  if (isHealthy) {
-    return {
-      status: 'PERFECT',
-      source: 'Autonomous AI Optimization Engine (Telemetry-Driven)',
-      summary: `Agent "${agentName}" is performing optimally across ${telemetryRows.length} recent queries. User satisfaction is high with no degraded answers.`,
-      performanceScore: 98,
-      themes: [
-        { label: 'High Precision', type: 'positive', details: 'All answers returned with healthy status and no query failures.' },
-        { label: 'Optimal Latency', type: 'positive', details: `Average latency is ${avgLatency}ms, well within target SLAs.` },
-        { label: 'Prompt Alignment', type: 'positive', details: 'Instructions accurately cover incoming user query intents.' }
-      ],
-      rootCauseAnalysis: 'The agent prompt and linked explores closely match user query intent. Zero degradation or unhandled edge cases observed in recent telemetry.',
-      recommendations: {
-        instructionImprovements: 'No prompt modifications required at this time. Current instructions are effective.',
-        suggestedFullInstructions: existingInstructions,
-        sourcesRecommendations: 'Current LookML explores provide comprehensive coverage for all observed questions.',
-        codeInterpreterRecommendation: 'Maintain current configuration.'
-      },
-      actionPlan: [
-        'Continue monitoring telemetry stream.',
-        'No immediate updates required.'
-      ]
-    };
-  }
-
-  // Construct dynamic themes based on real telemetry
-  const themes = [];
-  if (negativeRatings.length > 0) {
-    themes.push({
-      label: 'Query Ambiguity & Failures',
-      type: 'negative',
-      details: `${negativeRatings.length} conversation(s) received negative ratings or failed to produce answers (e.g. "${sampleProblems[0] || 'relative timeframe queries'}").`
-    });
-  }
-  if (highLatencyRows.length > 0) {
-    themes.push({
-      label: 'Latency Bottlenecks',
-      type: 'warning',
-      details: `${highLatencyRows.length} query(s) experienced latencies exceeding 1500ms (average: ${avgLatency}ms).`
-    });
-  }
-  themes.push({
-    label: 'Format & Synthesis Guidance',
-    type: 'positive',
-    details: 'Telemetry indicates users prefer structured, bulleted executive summaries over raw data dumps.'
-  });
-
-  // Construct tailored instruction additions
-  let instructionAdditions = [];
-  instructionAdditions.push('- When a user references relative dates (e.g., "last quarter", "recent", "this month"), default to the primary event timestamp dimension unless explicitly specified.');
-  instructionAdditions.push('- Format all multi-metric responses as concise bulleted executive summaries with key takeaways upfront.');
-  instructionAdditions.push('- If a user asks for data outside the linked explores, clearly state what domains are supported before declining.');
-
-  const suggestedFull = existingInstructions
-    ? `${existingInstructions.trim()}\n\n# Autonomous Optimization Refinements\n${instructionAdditions.join('\n')}`
-    : `# Autonomous Optimization Refinements\n${instructionAdditions.join('\n')}`;
-
-  return {
-    status: 'NEEDS_OPTIMIZATION',
-    source: 'Autonomous AI Optimization Engine (Telemetry-Driven)',
-    summary: `Identified ${negativeRatings.length} negative rating(s) and latency bottlenecks for "${agentName}". Instruction refinements and date dimension defaults recommended.`,
-    performanceScore,
-    themes,
-    rootCauseAnalysis: `Analysis of ${telemetryRows.length} recent queries revealed ${negativeRatings.length} failure(s). Users encountered ambiguity around relative date bounds and unhandled dimensions, causing query degradation. Explicit guidance in the prompt will eliminate these failure modes.`,
-    recommendations: {
-      instructionImprovements: 'Add explicit relative date defaults, concise executive summary constraints, and out-of-scope guidance.',
-      suggestedFullInstructions: suggestedFull,
-      sourcesRecommendations: 'Ensure linked explores contain pre-aggregated PDTs and necessary foreign keys to reduce latency for high-volume dimensions.',
-      codeInterpreterRecommendation: 'Keep code interpreter enabled for dynamic forecasting and statistical trend calculations.'
-    },
-    actionPlan: [
-      'Apply suggested prompt instructions to resolve relative date defaults.',
-      'Test updated instructions in Live Preview chat.',
-      'Deploy changes to Looker API.'
-    ]
+  const token = userAuthToken ? userAuthToken.trim() : "";
+  const headers = {
+    "Content-Type": "application/json"
   };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const payload = {
+    agent: agentConfig,
+    telemetry: telemetryRows
+  };
+
+  const primaryCloudRunUrl = "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent";
+  const fallbackCloudRunUrl = "https://agent-optimizer-backend-82452831399.us-central1.run.app/api/optimize-agent";
+  const localProxyUrl = "/api/optimize-agent";
+
+  let lastError = null;
+
+  // 1. Try Looker Extension SDK fetchProxy (official Looker proxy for external APIs)
+  if (extensionSDK && typeof extensionSDK.fetchProxy === "function") {
+    for (const url of [primaryCloudRunUrl, fallbackCloudRunUrl]) {
+      try {
+        console.info(`[AgentOptimizer] Dispatching optimization request via extensionSDK.fetchProxy to ${url}...`);
+        const response = await extensionSDK.fetchProxy(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload)
+        });
+
+        if (response && response.ok && response.body) {
+          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
+          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via fetchProxy)";
+          return data;
+        }
+
+        if (response && !response.ok) {
+          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
+          const msg = `Cloud Run API returned HTTP ${response.status}: ${errDetail}`;
+          console.warn(`[AgentOptimizer] ${msg}`);
+          lastError = new Error(msg);
+        }
+      } catch (err) {
+        console.warn(`[AgentOptimizer] fetchProxy to ${url} encountered an error:`, err);
+        lastError = err;
+      }
+    }
+  }
+
+  // 2. Direct browser fetch (for standalone local dev or direct network connectivity)
+  for (const url of [primaryCloudRunUrl, fallbackCloudRunUrl, localProxyUrl]) {
+    try {
+      console.info(`[AgentOptimizer] Dispatching direct fetch to ${url}...`);
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        data.source = url.includes("run.app")
+          ? "Vertex AI (Gemini 2.5 Flash on Cloud Run Direct)"
+          : "Local Vertex Proxy (Dev Server)";
+        return data;
+      } else {
+        const errBody = await res.text().catch(() => "");
+        const msg = `${url} returned HTTP ${res.status}: ${errBody || res.statusText}`;
+        console.warn(`[AgentOptimizer] ${msg}`);
+        lastError = new Error(msg);
+      }
+    } catch (err) {
+      console.warn(`[AgentOptimizer] Direct fetch to ${url} failed:`, err);
+      lastError = err;
+    }
+  }
+
+  // If the API call fails, throw the actual error so the UI displays the genuine backend status
+  throw new Error(
+    lastError?.message ||
+    "Failed to reach Cloud Run Vertex AI Optimizer backend. Please ensure a valid Google Identity Token is configured."
+  );
 }
