@@ -38,7 +38,7 @@ export const App = ({ isStandalone = false }) => {
   const [gcpToken, setGcpToken] = useState('');
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenSavedMsg, setTokenSavedMsg] = useState('');
-  const [googleClientId, setGoogleClientId] = useState("82452831399-0bvo81676tn7a09tvpsn6fs87nv82dr6.apps.googleusercontent.com");
+  const [googleClientId, setGoogleClientId] = useState("82452831399-dijmme0rntvi0d8ro8g24rl9fnbjrq0d.apps.googleusercontent.com");
   const [isSigningIn, setIsSigningIn] = useState(false);
 
   const handleGoogleSignIn = async () => {
@@ -49,12 +49,14 @@ export const App = ({ isStandalone = false }) => {
         throw new Error("Looker Extension SDK oauth2Authenticate is not available.");
       }
 
+      const nonce = Math.random().toString(36).substring(2) + Date.now().toString(36);
       const authResponse = await extensionSDK.oauth2Authenticate(
         "https://accounts.google.com/o/oauth2/v2/auth",
         {
           client_id: googleClientId.trim(),
           scope: "openid email profile",
-          response_type: "token"
+          response_type: "id_token",
+          nonce: nonce
         }
       );
 
