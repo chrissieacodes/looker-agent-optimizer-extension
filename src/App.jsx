@@ -38,6 +38,47 @@ export const App = ({ isStandalone = false }) => {
   const [gcpToken, setGcpToken] = useState('');
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenSavedMsg, setTokenSavedMsg] = useState('');
+  const [googleClientId, setGoogleClientId] = useState("82452831399-0bvo81676tn7a09tvpsn6fs87nv82dr6.apps.googleusercontent.com");
+  const [isSigningIn, setIsSigningIn] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    setIsSigningIn(true);
+    setTokenSavedMsg("");
+    try {
+      if (!extensionSDK || typeof extensionSDK.oauth2Authenticate !== "function") {
+        throw new Error("Looker Extension SDK oauth2Authenticate is not available.");
+      }
+
+      const authResponse = await extensionSDK.oauth2Authenticate(
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        {
+          client_id: googleClientId.trim(),
+          scope: "openid email profile",
+          response_type: "token"
+        }
+      );
+
+      const token = authResponse?.access_token || authResponse?.id_token;
+      if (token) {
+        setGcpToken(token);
+        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
+          await extensionSDK.localStorageSetItem("gcp_auth_token", token).catch(() => {});
+        }
+        setTokenSavedMsg("✓ Successfully authenticated with Google!");
+        setTimeout(() => setTokenSavedMsg(""), 4000);
+        return token;
+      } else {
+        throw new Error("No token returned from Google authentication popup.");
+      }
+    } catch (err) {
+      console.error("Google OAuth sign-in error:", err);
+      setTokenSavedMsg(`Google Sign-In: ${err.message || err}`);
+      return null;
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
   // Load saved GCP token via Extension SDK storage
   useEffect(() => {
     if (extensionSDK && typeof extensionSDK.localStorageGetItem === "function") {
@@ -206,6 +247,15 @@ export const App = ({ isStandalone = false }) => {
     setIsOptimizing(true);
     setOptimizationError('');
 
+    let activeToken = gcpToken;
+    if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
+      activeToken = await handleGoogleSignIn();
+      if (!activeToken) {
+        setIsOptimizing(false);
+        return;
+      }
+    }
+
     try {
       const agentConfig = {
         id: selectedAgentId,
@@ -216,7 +266,7 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      const report = await requestAgentOptimization(agentConfig, telemetryRows, gcpToken, extensionSDK);
+      const report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
       setOptimizationReport(report);
     } catch (err) {
       console.error('Optimization run error:', err);
