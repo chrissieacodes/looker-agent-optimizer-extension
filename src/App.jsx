@@ -156,9 +156,14 @@ export const App = ({ isStandalone = false }) => {
       setTelemetryRows(rows);
 
       // Pre-initialize conversation for chat preview
-      const conv = await createConversation(coreSDK, agentId);
-      if (conv && conv.id) {
-        setConversationId(conv.id);
+      try {
+        const convName = details?.name ? `Chat Preview: ${details.name}` : `Preview Chat - ${agentId}`;
+        const conv = await createConversation(coreSDK, agentId, convName);
+        if (conv && conv.id) {
+          setConversationId(conv.id);
+        }
+      } catch (convErr) {
+        console.warn("Could not pre-initialize conversation for agent:", convErr);
       }
     } catch (err) {
       console.error('Failed to load agent details:', err);
@@ -225,7 +230,8 @@ export const App = ({ isStandalone = false }) => {
     try {
       let activeConvId = conversationId;
       if (!activeConvId) {
-        const conv = await createConversation(coreSDK, selectedAgentId);
+        const convName = editName ? `Chat Preview: ${editName}` : `Preview Chat - ${selectedAgentId}`;
+        const conv = await createConversation(coreSDK, selectedAgentId, convName);
         activeConvId = conv.id;
         setConversationId(conv.id);
       }

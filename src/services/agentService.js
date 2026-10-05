@@ -120,16 +120,24 @@ export async function updateAgentConfig(coreSDK, agentId, updatePayload) {
   }
 }
 
-export async function createConversation(coreSDK, agentId) {
-  if (agentId.startsWith('fake_')) {
+export async function createConversation(coreSDK, agentId, name = null) {
+  if (agentId && agentId.startsWith("fake_")) {
     return { id: `fake_conv_${Date.now()}` };
   }
 
+  const convName = name || `Preview Chat - ${agentId}`;
+
   try {
     if (coreSDK.create_conversation) {
-      return await coreSDK.ok(coreSDK.create_conversation({ agent_id: agentId }));
+      return await coreSDK.ok(coreSDK.create_conversation({
+        name: convName,
+        agent_id: agentId
+      }));
     } else {
-      return await coreSDK.ok(coreSDK.post('/conversations', null, { agent_id: agentId }));
+      return await coreSDK.ok(coreSDK.post("/conversations", null, {
+        name: convName,
+        agent_id: agentId
+      }));
     }
   } catch (err) {
     console.error(`Error creating conversation for agent ${agentId}:`, err);
