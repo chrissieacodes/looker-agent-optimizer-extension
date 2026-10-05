@@ -257,7 +257,46 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
 
   const cloudRunUrl = "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent";
 
-  // 1. Looker Extension SDK fetchProxy (official Looker proxy method)
+  // 1. Looker Extension SDK serverProxy (Looker server handles secret tag replacement and avoids browser CORS/sandbox limits)
+  if (extensionSDK && typeof extensionSDK.serverProxy === "function") {
+    try {
+      const secretTag = typeof extensionSDK.createSecretKeyTag === "function"
+        ? extensionSDK.createSecretKeyTag("backend_token")
+        : null;
+
+      const serverHeaders = {
+        "Content-Type": "application/json"
+      };
+
+      if (token) {
+        serverHeaders["Authorization"] = `Bearer ${token}`;
+      } else if (secretTag) {
+        serverHeaders["Authorization"] = `Bearer ${secretTag}`;
+      }
+
+      const response = await extensionSDK.serverProxy(cloudRunUrl, {
+        method: "POST",
+        headers: serverHeaders,
+        body: JSON.stringify({
+          ...payload,
+          ...(secretTag ? { auth_token: secretTag } : {})
+        })
+      });
+
+      if (response && response.ok && response.body) {
+        const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
+        data.source = "Vertex AI (Cloud Run via Looker serverProxy)";
+        return data;
+      }
+      if (response && (response.status === 401 || response.status === 403)) {
+        console.warn(`Looker serverProxy auth required (${response.status}). Check backend_token user attribute.`);
+      }
+    } catch (err) {
+      console.warn("Looker serverProxy call failed, falling back to fetchProxy:", err);
+    }
+  }
+
+  // 2. Looker Extension SDK fetchProxy (browser UI proxy)
   if (extensionSDK && typeof extensionSDK.fetchProxy === "function") {
     try {
       const response = await extensionSDK.fetchProxy(cloudRunUrl, {
@@ -278,7 +317,7 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
     }
   }
 
-  // 2. Direct browser fetch (for local standalone testing)
+  // 3. Direct browser fetch (for local standalone testing)
   const endpoints = [
     cloudRunUrl,
     "/api/optimize-agent"

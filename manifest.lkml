@@ -30,7 +30,9 @@ application: agent_optimizer {
     local_storage: yes
     navigation: yes
     new_window: yes
-    scoped_user_attributes: []
+    scoped_user_attributes: [
+      "backend_token"
+    ]
     external_api_urls: [
       "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app"
     ]
