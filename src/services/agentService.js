@@ -271,6 +271,10 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
 }
 
 export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null) {
+  if (!extensionSDK || typeof extensionSDK.fetchProxy !== "function") {
+    throw new Error("Looker Extension SDK fetchProxy is not available.");
+  }
+
   const token = userAuthToken ? userAuthToken.trim() : "";
   const headers = {
     "Content-Type": "application/json"
@@ -284,99 +288,40 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
     telemetry: telemetryRows
   };
 
-  const primaryCloudRunUrl = "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent";
-  const fallbackCloudRunUrl = "https://agent-optimizer-backend-82452831399.us-central1.run.app/api/optimize-agent";
-  const endpoints = [primaryCloudRunUrl, fallbackCloudRunUrl];
+  const endpoints = [
+    "https://agent-optimizer-backend-82452831399.us-central1.run.app/api/optimize-agent",
+    "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent"
+  ];
 
   let lastError = null;
 
-  // 1. Try Looker Extension SDK serverProxy (Server-to-Server dispatch: avoids browser CORS preflight entirely)
-  if (extensionSDK && typeof extensionSDK.serverProxy === "function") {
-    for (const url of endpoints) {
-      try {
-        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.serverProxy: ${url}...`);
-        const response = await extensionSDK.serverProxy(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok && response.body) {
-          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via Looker serverProxy)";
-          return data;
-        }
-
-        if (response && !response.ok) {
-          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-          console.warn(`[AgentOptimizer] serverProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-          lastError = new Error(`Looker serverProxy returned HTTP ${response.status}: ${errDetail}`);
-        }
-      } catch (err) {
-        console.warn(`[AgentOptimizer] serverProxy to ${url} failed:`, err);
-        lastError = err;
-      }
-    }
-  }
-
-  // 2. Try Looker Extension SDK fetchProxy (UI browser proxy)
-  if (extensionSDK && typeof extensionSDK.fetchProxy === "function") {
-    for (const url of endpoints) {
-      try {
-        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.fetchProxy: ${url}...`);
-        const response = await extensionSDK.fetchProxy(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok && response.body) {
-          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via fetchProxy)";
-          return data;
-        }
-
-        if (response && !response.ok) {
-          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-          console.warn(`[AgentOptimizer] fetchProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-          lastError = new Error(`Cloud Run fetchProxy returned HTTP ${response.status}: ${errDetail}`);
-        }
-      } catch (err) {
-        console.warn(`[AgentOptimizer] fetchProxy to ${url} encountered an error:`, err);
-        lastError = err;
-      }
-    }
-  }
-
-  // 3. Direct browser fetch
   for (const url of endpoints) {
     try {
-      console.info(`[AgentOptimizer] Calling endpoint directly: ${url}...`);
-      const res = await fetch(url, {
+      console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.fetchProxy: ${url}...`);
+      const response = await extensionSDK.fetchProxy(url, {
         method: "POST",
         headers,
         body: JSON.stringify(payload)
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run Direct)";
+      if (response && response.ok && response.body) {
+        const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
+        data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via fetchProxy)";
         return data;
-      } else {
-        const errBody = await res.text().catch(() => "");
-        const msg = `${url} returned HTTP ${res.status}: ${errBody || res.statusText}`;
-        console.warn(`[AgentOptimizer] ${msg}`);
-        lastError = new Error(msg);
+      }
+
+      if (response && !response.ok) {
+        const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
+        console.warn(`[AgentOptimizer] fetchProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
+        lastError = new Error(`Cloud Run returned HTTP ${response.status}: ${errDetail}`);
       }
     } catch (err) {
-      console.warn(`[AgentOptimizer] Direct fetch to ${url} failed:`, err);
+      console.warn(`[AgentOptimizer] fetchProxy to ${url} failed:`, err);
       lastError = err;
     }
   }
 
-  // If the API call fails, throw the actual error so the UI displays the genuine backend status
-  throw new Error(
-    lastError?.message ||
-    "Failed to reach Cloud Run Vertex AI Optimizer backend. Please ensure a valid Google Identity Token is configured."
-  );
+  throw lastError || new Error("Failed to reach Cloud Run Vertex AI Optimizer backend via fetchProxy.");
 }
+
+export const optimizeAgent = requestAgentOptimization;
