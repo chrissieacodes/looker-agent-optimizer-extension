@@ -91,10 +91,6 @@ export const App = ({ isStandalone = false }) => {
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [filterExcludeDashboards, setFilterExcludeDashboards] = useState(true);
 
-  // Model Selector Filter & Search State
-  const [agentSearchQuery, setAgentSearchQuery] = useState('');
-  const [agentFilterTab, setAgentFilterTab] = useState('with_feedback'); // 'with_feedback', 'needs_attention', 'custom_studio', 'all'
-
   // Table Sorting & Column Widths
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
   const [columnWidths, setColumnWidths] = useState({
@@ -365,28 +361,6 @@ export const App = ({ isStandalone = false }) => {
     return allAvailableAgents.filter(a => a.feedbackCount > 0 && (!filterExcludeDashboards || !a.isDashboard));
   }, [allAvailableAgents, filterExcludeDashboards]);
 
-  const filteredAgents = useMemo(() => {
-    return allAvailableAgents.filter(a => {
-      if (filterExcludeDashboards && a.isDashboard && a.id !== selectedAgentId) {
-        return false;
-      }
-      if (agentFilterTab === 'with_feedback' && a.feedbackCount === 0) {
-        return false;
-      }
-      if (agentFilterTab === 'needs_attention' && a.negativeCount === 0) {
-        return false;
-      }
-      if (agentFilterTab === 'custom_studio' && !a.isStudioAgent) {
-        return false;
-      }
-      if (agentSearchQuery.trim()) {
-        const q = agentSearchQuery.toLowerCase();
-        return a.name.toLowerCase().includes(q) || String(a.id).toLowerCase().includes(q);
-      }
-      return true;
-    });
-  }, [allAvailableAgents, filterExcludeDashboards, agentFilterTab, agentSearchQuery, selectedAgentId]);
-
   const agentFeedbackCounts = useMemo(() => {
     return agentsWithFeedback;
   }, [agentsWithFeedback]);
@@ -635,328 +609,48 @@ export const App = ({ isStandalone = false }) => {
       )}
 
       {/* Header Container */}
-      <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '20px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: text }}>Agent Feedback Optimizer</h1>
-            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: muted }}>
-              Looker Extension Framework • Real-time Looker API & Agent Optimization
-            </p>
-          </div>
-          <button
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            style={{
-              background: 'transparent',
-              border: `1px solid ${border}`,
-              color: text,
-              padding: '8px 16px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '500',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
-          </button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>⚡</span> Agent Feedback Optimizer
+          </h1>
+          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: muted }}>
+            Looker Extension Framework • Real-time Looker API & Native BigQuery ML Optimization
+          </p>
         </div>
-
-        {/* Revamped Agent Selector & Filter Panel */}
-        <div style={{
-          backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
-          borderRadius: '10px',
-          border: `1px solid ${border}`,
-          padding: '16px',
-          marginTop: '12px'
-        }}>
-          {/* Top Control Bar: Search Input, Filter Tabs, and Hide Dashboards Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '300px', flexWrap: 'wrap' }}>
-              {/* Search text input */}
-              <div style={{ position: 'relative', width: '240px' }}>
-                <input
-                  type="text"
-                  placeholder="🔍 Search models or agents..."
-                  value={agentSearchQuery}
-                  onChange={(e) => setAgentSearchQuery(e.target.value)}
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '8px 28px 8px 12px',
-                    borderRadius: '8px',
-                    border: `1px solid ${border}`,
-                    backgroundColor: inputBg,
-                    color: text,
-                    fontSize: '13px',
-                    outline: 'none'
-                  }}
-                />
-                {agentSearchQuery && (
-                  <button
-                    onClick={() => setAgentSearchQuery('')}
-                    style={{
-                      position: 'absolute',
-                      right: '8px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none',
-                      border: 'none',
-                      color: muted,
-                      cursor: 'pointer',
-                      fontSize: '13px',
-                      padding: 0
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {/* Filter Tabs */}
-              <div style={{ display: 'flex', gap: '4px', backgroundColor: isDarkMode ? '#0f172a' : '#e2e8f0', padding: '3px', borderRadius: '8px', flexWrap: 'wrap' }}>
-                {[
-                  { id: 'with_feedback', label: `💬 With Feedback (${agentsWithFeedback.length})` },
-                  { id: 'needs_attention', label: `⚠️ Needs Attention (${allAvailableAgents.filter(a => a.negativeCount > 0 && (!filterExcludeDashboards || !a.isDashboard)).length})` },
-                  { id: 'custom_studio', label: `🤖 Studio Only (${allAvailableAgents.filter(a => a.isStudioAgent).length})` },
-                  { id: 'all', label: `All (${filteredAgents.length})` }
-                ].map(chip => (
-                  <button
-                    key={chip.id}
-                    onClick={() => setAgentFilterTab(chip.id)}
-                    style={{
-                      padding: '5px 10px',
-                      border: 'none',
-                      borderRadius: '6px',
-                      backgroundColor: agentFilterTab === chip.id ? primary : 'transparent',
-                      color: agentFilterTab === chip.id ? '#ffffff' : text,
-                      fontSize: '12px',
-                      fontWeight: agentFilterTab === chip.id ? '600' : '500',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Hide Dashboard Sessions Toggle */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', userSelect: 'none', color: text, fontWeight: '500' }}>
-                <input
-                  type="checkbox"
-                  checked={filterExcludeDashboards}
-                  onChange={(e) => {
-                    setFilterExcludeDashboards(e.target.checked);
-                    setTablePage(1);
-                  }}
-                  style={{ cursor: 'pointer' }}
-                />
-                <span>Hide Dashboard Sessions</span>
-              </label>
-              <span
-                title="Conversations initiated on Looker Dashboards create synthetic sessions (e.g. cymbal_pets::business_pulse). They are ad-hoc queries, not editable Agent Studio agents. Keep this checked to focus only on your real agents."
-                style={{ cursor: 'help', fontSize: '13px', color: muted }}
-              >
-                ℹ️
-              </span>
-            </div>
-          </div>
-
-          {/* Searchable Combobox Select + Quick Select Row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: '13px', fontWeight: '600', color: text, whiteSpace: 'nowrap' }}>Active Model:</label>
-            <select
-              value={selectedAgentId}
-              onChange={(e) => handleSelectAgent(e.target.value)}
-              disabled={loading}
-              style={{
-                flex: 1,
-                minWidth: '280px',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: `1px solid ${border}`,
-                backgroundColor: inputBg,
-                color: text,
-                fontSize: '13px',
-                outline: 'none',
-                fontWeight: '500'
-              }}
-            >
-              <option value="All">🌐 All Models & Agents ({masterTelemetryRows.length || telemetryRows.length} total queries)</option>
-              {filteredAgents.map(a => {
-                const badge = a.feedbackCount > 0 
-                  ? `[${a.feedbackCount} feedback${a.negativeCount > 0 ? ` • ${a.negativeCount} 👎` : ' • 👍'}]`
-                  : '[0 feedback]';
-                const typeLabel = a.isStudioAgent ? 'Agent Studio' : (a.isDashboard ? 'Dashboard Session' : 'General');
-                return (
-                  <option key={a.id} value={a.id}>
-                    {a.name} — {badge} ({typeLabel})
-                  </option>
-                );
-              })}
-            </select>
-
-            {selectedAgentId !== 'All' && (
-              <button
-                onClick={() => handleSelectAgent('All')}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: `1px solid ${border}`,
-                  color: primary,
-                  borderRadius: '8px',
-                  padding: '8px 14px',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                ✕ Clear Selection
-              </button>
-            )}
-          </div>
-
-          {/* Quick-Select Feedback Pills Bar */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: muted }}>
-                Quick Select: Models with Live Feedback
-              </span>
-              <span style={{ fontSize: '11px', color: muted }}>
-                Click any model to isolate its feedback & telemetry
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', scrollbarWidth: 'thin' }}>
-              {/* All Models Pill */}
-              <button
-                onClick={() => handleSelectAgent('All')}
-                style={{
-                  padding: '5px 12px',
-                  borderRadius: '16px',
-                  border: selectedAgentId === 'All' ? `2px solid ${primary}` : `1px solid ${border}`,
-                  backgroundColor: selectedAgentId === 'All' ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
-                  color: selectedAgentId === 'All' ? primary : text,
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  fontWeight: selectedAgentId === 'All' ? '700' : '500',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0
-                }}
-              >
-                <span>🌐 All Overview</span>
-                <span style={{
-                  backgroundColor: selectedAgentId === 'All' ? primary : (isDarkMode ? '#334155' : '#e2e8f0'),
-                  color: selectedAgentId === 'All' ? '#ffffff' : text,
-                  padding: '1px 6px',
-                  borderRadius: '10px',
-                  fontSize: '11px',
-                  fontWeight: '700'
-                }}>
-                  {masterTelemetryRows.length || telemetryRows.length}
-                </span>
-              </button>
-
-              {/* Agent Pills */}
-              {agentsWithFeedback.slice(0, 20).map(a => {
-                const isSelected = String(selectedAgentId) === String(a.id);
-                return (
-                  <button
-                    key={a.id}
-                    onClick={() => handleSelectAgent(a.id)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: '16px',
-                      border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
-                      backgroundColor: isSelected ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
-                      color: isSelected ? primary : text,
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                      fontWeight: isSelected ? '700' : '500',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0
-                    }}
-                    title={`${a.name} • ${a.feedbackCount} total queries • ${a.negativeCount} negative feedback`}
-                  >
-                    <span>{a.isDashboard ? '📊' : '🤖'} {a.name}</span>
-                    <span style={{
-                      backgroundColor: isSelected ? primary : (a.negativeCount > 0 ? '#fee2e2' : (isDarkMode ? '#334155' : '#e2e8f0')),
-                      color: isSelected ? '#ffffff' : (a.negativeCount > 0 ? '#b91c1c' : text),
-                      padding: '1px 6px',
-                      borderRadius: '10px',
-                      fontSize: '11px',
-                      fontWeight: '700'
-                    }}>
-                      {a.feedbackCount}
-                    </span>
-                    {a.negativeCount > 0 && <span style={{ fontSize: '11px' }}>⚠️</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Active Model Banner */}
-          {selectedAgentId !== 'All' && (
-            <div style={{
-              marginTop: '12px',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              backgroundColor: isDarkMode ? '#0f172a' : '#eff6ff',
-              border: `1px solid ${isDarkMode ? '#334155' : '#bfdbfe'}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '8px',
-              fontSize: '12px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '14px' }}>🎯</span>
-                <span>Active Filter: <strong style={{ color: text }}>{editName || selectedAgentId}</strong></span>
-                <span style={{
-                  fontSize: '11px',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  backgroundColor: currentAgent?.isDashboard ? '#fef3c7' : '#dbeafe',
-                  color: currentAgent?.isDashboard ? '#92400e' : '#1e40af',
-                  fontWeight: '600'
-                }}>
-                  {currentAgent?.isDashboard ? 'Dashboard Session' : 'Agent Studio Agent'}
-                </span>
-                <span style={{ color: muted }}>
-                  &bull; {telemetryRows.length} matching feedback queries
-                </span>
-              </div>
-              <button
-                onClick={() => handleSelectAgent('All')}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  color: primary,
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '12px',
-                  padding: 0
-                }}
-              >
-                ✕ View All Models
-              </button>
-            </div>
-          )}
-        </div>
+        <button
+          onClick={() => setIsDarkMode(!isDarkMode)}
+          style={{
+            background: cardBg,
+            border: `1px solid ${border}`,
+            color: text,
+            padding: '7px 14px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: '500',
+            fontSize: '13px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+          }}
+        >
+          {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+        </button>
       </div>
 
-      {/* Navigation Tabs */}
-      <div style={{ display: 'flex', gap: '8px', borderBottom: `1px solid ${border}`, marginBottom: '24px', flexWrap: 'wrap' }}>
+      {/* Primary Navigation Tabs - ON TOP */}
+      <div style={{
+        display: 'flex',
+        gap: '4px',
+        borderBottom: `2px solid ${border}`,
+        marginBottom: '20px',
+        backgroundColor: cardBg,
+        borderRadius: '10px 10px 0 0',
+        padding: '6px 12px 0 12px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        flexWrap: 'wrap'
+      }}>
         {[
           { id: 'analytics', label: '📊 Analytics & Feedback' },
           { id: 'details', label: '⚙️ Agent Details & Live Preview' },
@@ -967,20 +661,163 @@ export const App = ({ isStandalone = false }) => {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
-              padding: '10px 20px',
+              padding: '11px 18px',
               background: 'none',
               border: 'none',
               borderBottom: activeTab === tab.id ? `3px solid ${primary}` : '3px solid transparent',
               color: activeTab === tab.id ? primary : muted,
-              fontWeight: activeTab === tab.id ? '600' : '500',
+              fontWeight: activeTab === tab.id ? '700' : '500',
               cursor: 'pointer',
-              fontSize: '15px'
+              fontSize: '14px',
+              marginBottom: '-2px',
+              transition: 'all 0.15s ease'
             }}
           >
             {tab.label}
           </button>
         ))}
       </div>
+
+      {/* Model Selector Bar with Pills (for Analytics, Details, Optimizer) */}
+      {activeTab !== 'architecture' && (
+        <div style={{
+          backgroundColor: cardBg,
+          borderRadius: '10px',
+          border: `1px solid ${border}`,
+          padding: '12px 16px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: muted, whiteSpace: 'nowrap' }}>
+            Model:
+          </span>
+
+          {/* Quick-Select Pills */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', flex: 1 }}>
+            {/* All Models Pill */}
+            <button
+              onClick={() => handleSelectAgent('All')}
+              style={{
+                padding: '5px 13px',
+                borderRadius: '16px',
+                border: selectedAgentId === 'All' ? `2px solid ${primary}` : `1px solid ${border}`,
+                backgroundColor: selectedAgentId === 'All' ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                color: selectedAgentId === 'All' ? primary : text,
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: selectedAgentId === 'All' ? '700' : '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              <span>🌐 All Models</span>
+              <span style={{
+                backgroundColor: selectedAgentId === 'All' ? primary : (isDarkMode ? '#334155' : '#e2e8f0'),
+                color: selectedAgentId === 'All' ? '#ffffff' : text,
+                padding: '1px 6px',
+                borderRadius: '10px',
+                fontSize: '11px',
+                fontWeight: '700'
+              }}>
+                {masterTelemetryRows.length || telemetryRows.length}
+              </span>
+            </button>
+
+            {/* Model Pills with Live Feedback */}
+            {agentsWithFeedback.map(a => {
+              const isSelected = String(selectedAgentId) === String(a.id);
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => handleSelectAgent(a.id)}
+                  style={{
+                    padding: '5px 13px',
+                    borderRadius: '16px',
+                    border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
+                    backgroundColor: isSelected ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                    color: isSelected ? primary : text,
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    fontWeight: isSelected ? '700' : '500',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    whiteSpace: 'nowrap'
+                  }}
+                  title={`${a.name} • ${a.feedbackCount} feedback • ${a.negativeCount} negative feedback`}
+                >
+                  <span>{a.isDashboard ? '📊' : '🤖'} {a.name}</span>
+                  <span style={{
+                    backgroundColor: isSelected ? primary : (a.negativeCount > 0 ? '#fee2e2' : (isDarkMode ? '#334155' : '#e2e8f0')),
+                    color: isSelected ? '#ffffff' : (a.negativeCount > 0 ? '#b91c1c' : text),
+                    padding: '1px 6px',
+                    borderRadius: '10px',
+                    fontSize: '11px',
+                    fontWeight: '700'
+                  }}>
+                    {a.feedbackCount}
+                  </span>
+                  {a.negativeCount > 0 && <span style={{ fontSize: '11px' }}>⚠️</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Quick Clear or Dropdown for other agents */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <select
+              value={selectedAgentId}
+              onChange={(e) => handleSelectAgent(e.target.value)}
+              disabled={loading}
+              title="Select any agent or model in the system"
+              style={{
+                padding: '4px 8px',
+                borderRadius: '6px',
+                border: `1px solid ${border}`,
+                backgroundColor: inputBg,
+                color: muted,
+                fontSize: '11px',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="All">All Models ({masterTelemetryRows.length || telemetryRows.length})</option>
+              {allAvailableAgents
+                .filter(a => !a.isDashboard)
+                .map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.feedbackCount} feedback)
+                  </option>
+                ))}
+            </select>
+
+            {selectedAgentId !== 'All' && (
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: `1px solid ${border}`,
+                  color: primary,
+                  borderRadius: '6px',
+                  padding: '3px 8px',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                ✕ Reset
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* TAB 1: Analytics & Feedback */}
       {activeTab === 'analytics' && (
