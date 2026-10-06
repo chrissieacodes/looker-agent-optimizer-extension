@@ -184,14 +184,16 @@ export async function sendChatMessage(coreSDK, conversationId, userMessage, agen
   }
 }
 
-export async function runTelemetryQuery(coreSDK, agentId = null) {
+export async function runTelemetryQuery(coreSDK, agentId = null, limit = 500) {
   const filters = {};
   if (agentId && agentId !== "All" && !agentId.startsWith("fake_")) {
-    // In system__activity, agent.id is a number dimension, while agent.guid is a string dimension
+    // In system__activity, agent.id is numeric, agent.guid is a 32-char hex string, and agent.name is text
     if (/^\d+$/.test(String(agentId))) {
       filters["agent.id"] = String(agentId);
-    } else {
+    } else if (/^[0-9a-fA-F-]{32,36}$/.test(String(agentId))) {
       filters["agent.guid"] = String(agentId);
+    } else {
+      filters["agent.name"] = String(agentId);
     }
   }
 
@@ -217,7 +219,7 @@ export async function runTelemetryQuery(coreSDK, agentId = null) {
         ],
         filters: filters,
         sorts: ['conversation_sa_telemetry.timestamp desc'],
-        limit: 50
+        limit: limit
       }
     }));
     return rows;

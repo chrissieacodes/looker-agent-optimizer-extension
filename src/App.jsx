@@ -152,7 +152,18 @@ export const App = ({ isStandalone = false }) => {
   const [isChatLoading, setIsChatLoading] = useState(false);
 
   // Telemetry Rows
+  const [masterTelemetryRows, setMasterTelemetryRows] = useState([]);
   const [telemetryRows, setTelemetryRows] = useState([]);
+
+  // Table Pagination & Search State
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(25);
+  const [tableSearchQuery, setTableSearchQuery] = useState('');
+  const [filterExcludeDashboards, setFilterExcludeDashboards] = useState(true);
+
+  // Model Selector Filter & Search State
+  const [agentSearchQuery, setAgentSearchQuery] = useState('');
+  const [agentFilterTab, setAgentFilterTab] = useState('with_feedback'); // 'with_feedback', 'needs_attention', 'custom_studio', 'all'
 
   // Table Sorting & Column Widths
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
@@ -202,11 +213,13 @@ export const App = ({ isStandalone = false }) => {
 
   // Resolve Agent display name and ID from telemetry row
   const getAgentInfo = (row) => {
-    if (!row) return { displayName: 'Unknown Agent', targetId: null };
+    if (!row) return { displayName: 'Unknown Agent', targetId: null, isDashboard: false };
     const guid = row['agent.guid'];
     const numericId = row['agent.id'];
     const rawName = row['agent.name'];
     const formattedName = row['agent.formatted_name'];
+    const category = row['conversation.category'];
+    const isDashboard = category === 'dashboard' || (rawName && rawName.startsWith('http'));
 
     // Try finding in loaded agents list
     const matched = agents.find(a => 
@@ -217,20 +230,44 @@ export const App = ({ isStandalone = false }) => {
 
     let displayName = matched?.name || formattedName || rawName;
     if (!displayName) {
-      displayName = 'General Agent';
+      displayName = isDashboard ? 'Dashboard Session' : 'General Agent';
     } else if (displayName.startsWith('http') && displayName.includes('-')) {
       const parts = displayName.split('-');
       displayName = parts.slice(1).join('-') || displayName;
     }
 
-    const targetId = matched?.id || guid || (numericId ? String(numericId) : null);
-    return { displayName, targetId, isMatched: !!matched };
+    const targetId = matched?.id || (numericId ? String(numericId) : null) || guid || rawName;
+    return { displayName, targetId, isMatched: !!matched, isDashboard, rawName, guid, numericId };
   };
+
+  // Filter telemetry rows based on exclude dashboards toggle, search query, etc.
+  const filteredTelemetryRows = useMemo(() => {
+    return telemetryRows.filter(r => {
+      // If exclude dashboards is true and we are on All view
+      const isDashboardRow = r['conversation.category'] === 'dashboard' || (r['agent.name'] && r['agent.name'].startsWith('http'));
+      if (filterExcludeDashboards && isDashboardRow && selectedAgentId === 'All') {
+        return false;
+      }
+      // Table search query (searches user message, agent name, category, or conversation ID)
+      if (tableSearchQuery.trim()) {
+        const q = tableSearchQuery.toLowerCase();
+        const msg = (r['conversation_sa_telemetry.user_message_truncated'] || '').toLowerCase();
+        const { displayName } = getAgentInfo(r);
+        const name = displayName.toLowerCase();
+        const cat = (r['conversation.category'] || '').toLowerCase();
+        const id = String(r['conversation.id'] || '');
+        if (!msg.includes(q) && !name.includes(q) && !cat.includes(q) && !id.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [telemetryRows, filterExcludeDashboards, selectedAgentId, tableSearchQuery, agents]);
 
   // Sort telemetry rows
   const sortedTelemetryRows = useMemo(() => {
-    if (!sortConfig.key) return telemetryRows;
-    const sorted = [...telemetryRows];
+    if (!sortConfig.key) return filteredTelemetryRows;
+    const sorted = [...filteredTelemetryRows];
     sorted.sort((a, b) => {
       let valA, valB;
       switch (sortConfig.key) {
@@ -278,34 +315,151 @@ export const App = ({ isStandalone = false }) => {
       return 0;
     });
     return sorted;
-  }, [telemetryRows, sortConfig, agents]);
+  }, [filteredTelemetryRows, sortConfig, agents]);
+
+  // Table pagination calculations
+  const totalTableRows = sortedTelemetryRows.length;
+  const effectivePageSize = tablePageSize === -1 ? totalTableRows : tablePageSize;
+  const totalPages = Math.max(1, Math.ceil(totalTableRows / (effectivePageSize || 1)));
+  const safeCurrentPage = Math.min(Math.max(1, tablePage), totalPages);
+  const startRowIdx = (safeCurrentPage - 1) * effectivePageSize;
+  const endRowIdx = Math.min(startRowIdx + effectivePageSize, totalTableRows);
+  const paginatedTelemetryRows = useMemo(() => {
+    return sortedTelemetryRows.slice(startRowIdx, endRowIdx);
+  }, [sortedTelemetryRows, startRowIdx, endRowIdx]);
 
   const totalTableWidth = useMemo(() => {
     return Object.values(columnWidths).reduce((acc, w) => acc + w, 0);
   }, [columnWidths]);
 
-  // Distinct agents breakdown from current telemetry rows
-  const agentFeedbackCounts = useMemo(() => {
+  // Combined agents list: custom Agent Studio agents + all agents discovered in telemetry
+  const allAvailableAgents = useMemo(() => {
     const map = new Map();
-    telemetryRows.forEach(r => {
-      const { displayName, targetId } = getAgentInfo(r);
-      const key = targetId || displayName;
-      if (!map.has(key)) {
-        map.set(key, { displayName, targetId, count: 0, negativeCount: 0 });
+
+    // 1. Add custom agents from search_agents / Agent Studio
+    agents.forEach(a => {
+      const idKey = String(a.id);
+      map.set(idKey, {
+        id: a.id,
+        name: a.name || a.id,
+        rawName: a.name || a.id,
+        isStudioAgent: !String(a.id).startsWith('fake_'),
+        isMock: String(a.id).startsWith('fake_'),
+        isDashboard: false,
+        feedbackCount: 0,
+        positiveCount: 0,
+        negativeCount: 0,
+        guid: a.guid || null,
+        numericId: a.numeric_id || null,
+        description: a.description || ''
+      });
+    });
+
+    // 2. Discover agents from telemetry rows (e.g. system__activity)
+    const sourceRows = masterTelemetryRows.length > 0 ? masterTelemetryRows : telemetryRows;
+    sourceRows.forEach(r => {
+      const guid = r['agent.guid'];
+      const numericId = r['agent.id'];
+      const rawName = r['agent.name'];
+      const formattedName = r['agent.formatted_name'];
+      const category = r['conversation.category'];
+      const isDash = category === 'dashboard' || (rawName && rawName.startsWith('http'));
+
+      let displayName = formattedName || rawName;
+      if (!displayName) {
+        displayName = isDash ? 'Dashboard Session' : 'General Agent';
+      } else if (displayName.startsWith('http') && displayName.includes('-')) {
+        const parts = displayName.split('-');
+        displayName = parts.slice(1).join('-') || displayName;
       }
-      const item = map.get(key);
-      item.count += 1;
-      if (
-        r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' ||
+
+      // Match existing agent by guid, numericId, or name
+      let existingKey = null;
+      for (const [key, entry] of map.entries()) {
+        if (
+          (guid && (key === String(guid) || entry.guid === guid)) ||
+          (numericId && (key === String(numericId) || entry.numericId === numericId)) ||
+          (rawName && (entry.rawName === rawName || entry.name === rawName || entry.name === displayName))
+        ) {
+          existingKey = key;
+          break;
+        }
+      }
+
+      const key = existingKey || guid || (numericId ? String(numericId) : rawName) || displayName;
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          name: displayName,
+          rawName: rawName || displayName,
+          isStudioAgent: false,
+          isMock: false,
+          isDashboard: isDash,
+          feedbackCount: 0,
+          positiveCount: 0,
+          negativeCount: 0,
+          guid: guid || null,
+          numericId: numericId || null,
+          description: isDash ? 'Looker Dashboard Conversational Analytics Session' : ''
+        });
+      }
+
+      const entry = map.get(key);
+      entry.feedbackCount += 1;
+      const isNeg = r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN' ||
         r['conversation_sa_telemetry.answer_success'] === 'No' ||
         r['conversation_sa_telemetry.health'] === 'Degraded' ||
-        r['conversation_sa_telemetry.health'] === 'error'
-      ) {
-        item.negativeCount += 1;
+        r['conversation_sa_telemetry.health'] === 'error';
+      if (isNeg) {
+        entry.negativeCount += 1;
+      } else {
+        entry.positiveCount += 1;
       }
     });
-    return Array.from(map.values());
-  }, [telemetryRows, agents]);
+
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      if (b.feedbackCount !== a.feedbackCount) {
+        return b.feedbackCount - a.feedbackCount;
+      }
+      if (b.isStudioAgent !== a.isStudioAgent) {
+        return b.isStudioAgent ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return list;
+  }, [agents, masterTelemetryRows, telemetryRows]);
+
+  const agentsWithFeedback = useMemo(() => {
+    return allAvailableAgents.filter(a => a.feedbackCount > 0 && (!filterExcludeDashboards || !a.isDashboard));
+  }, [allAvailableAgents, filterExcludeDashboards]);
+
+  const filteredAgents = useMemo(() => {
+    return allAvailableAgents.filter(a => {
+      if (filterExcludeDashboards && a.isDashboard && a.id !== selectedAgentId) {
+        return false;
+      }
+      if (agentFilterTab === 'with_feedback' && a.feedbackCount === 0) {
+        return false;
+      }
+      if (agentFilterTab === 'needs_attention' && a.negativeCount === 0) {
+        return false;
+      }
+      if (agentFilterTab === 'custom_studio' && !a.isStudioAgent) {
+        return false;
+      }
+      if (agentSearchQuery.trim()) {
+        const q = agentSearchQuery.toLowerCase();
+        return a.name.toLowerCase().includes(q) || String(a.id).toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [allAvailableAgents, filterExcludeDashboards, agentFilterTab, agentSearchQuery, selectedAgentId]);
+
+  const agentFeedbackCounts = useMemo(() => {
+    return agentsWithFeedback;
+  }, [agentsWithFeedback]);
 
   // Initial Load: Fetch real agents and telemetry
   useEffect(() => {
@@ -316,6 +470,7 @@ export const App = ({ isStandalone = false }) => {
         setAgents(agentList);
 
         const rows = await runTelemetryQuery(coreSDK, null);
+        setMasterTelemetryRows(rows);
         setTelemetryRows(rows);
       } catch (err) {
         console.error('Initialization error:', err);
@@ -329,6 +484,7 @@ export const App = ({ isStandalone = false }) => {
   // Handle agent selection change
   const handleSelectAgent = async (agentId) => {
     setSelectedAgentId(agentId);
+    setTablePage(1);
     setSaveStatus('');
     setChatMessages([]);
     setConversationId(null);
@@ -341,11 +497,20 @@ export const App = ({ isStandalone = false }) => {
       setEditDescription('');
       setEditInstructions('');
       setEditSources([]);
-      // Reload telemetry for all
-      const rows = await runTelemetryQuery(coreSDK, null);
-      setTelemetryRows(rows);
+      if (masterTelemetryRows.length > 0) {
+        setTelemetryRows(masterTelemetryRows);
+      } else {
+        const rows = await runTelemetryQuery(coreSDK, null);
+        setMasterTelemetryRows(rows);
+        setTelemetryRows(rows);
+      }
       return;
     }
+
+    const agentMeta = allAvailableAgents.find(a => String(a.id) === String(agentId)) || {
+      id: agentId,
+      name: agentId
+    };
 
     try {
       const details = await getAgentDetails(coreSDK, agentId);
@@ -356,11 +521,6 @@ export const App = ({ isStandalone = false }) => {
       setEditSources(details.sources || []);
       setCodeInterpreter(!!details.code_interpreter);
 
-      // Load filtered telemetry
-      const rows = await runTelemetryQuery(coreSDK, agentId);
-      setTelemetryRows(rows);
-
-      // Pre-initialize conversation for chat preview
       try {
         const convName = details?.name ? `Chat Preview: ${details.name}` : `Preview Chat - ${agentId}`;
         const conv = await createConversation(coreSDK, agentId, convName);
@@ -371,7 +531,35 @@ export const App = ({ isStandalone = false }) => {
         console.warn("Could not pre-initialize conversation for agent:", convErr);
       }
     } catch (err) {
-      console.error('Failed to load agent details:', err);
+      console.warn('Agent is not an editable Agent Studio agent (e.g. dashboard session):', err);
+      setCurrentAgent(agentMeta);
+      setEditName(agentMeta.name || agentId);
+      setEditDescription(agentMeta.isDashboard ? 'Looker Dashboard Conversational Analytics Session' : (agentMeta.description || ''));
+      setEditInstructions('');
+      setEditSources([]);
+      setCodeInterpreter(false);
+    }
+
+    // Load filtered telemetry
+    try {
+      if (masterTelemetryRows.length > 0) {
+        const filtered = masterTelemetryRows.filter(r => {
+          const info = getAgentInfo(r);
+          return String(info.targetId) === String(agentId) ||
+                 String(r['agent.id']) === String(agentId) ||
+                 String(r['agent.guid']) === String(agentId) ||
+                 r['agent.name'] === agentId ||
+                 info.displayName === agentMeta.name;
+        });
+        if (filtered.length > 0) {
+          setTelemetryRows(filtered);
+          return;
+        }
+      }
+      const rows = await runTelemetryQuery(coreSDK, agentId);
+      setTelemetryRows(rows);
+    } catch (tErr) {
+      console.error('Failed to query telemetry for agent:', tErr);
     }
   };
 
@@ -558,31 +746,296 @@ export const App = ({ isStandalone = false }) => {
           </button>
         </div>
 
-        {/* Agent Selector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', maxWidth: '500px' }}>
-          <label style={{ fontSize: '14px', fontWeight: '600', color: text }}>Select Agent:</label>
-          <select
-            value={selectedAgentId}
-            onChange={(e) => handleSelectAgent(e.target.value)}
-            disabled={loading}
-            style={{
-              flex: 1,
-              padding: '10px 14px',
+        {/* Revamped Agent Selector & Filter Panel */}
+        <div style={{
+          backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+          borderRadius: '10px',
+          border: `1px solid ${border}`,
+          padding: '16px',
+          marginTop: '12px'
+        }}>
+          {/* Top Control Bar: Search Input, Filter Tabs, and Hide Dashboards Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '300px', flexWrap: 'wrap' }}>
+              {/* Search text input */}
+              <div style={{ position: 'relative', width: '240px' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Search models or agents..."
+                  value={agentSearchQuery}
+                  onChange={(e) => setAgentSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '8px 28px 8px 12px',
+                    borderRadius: '8px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: inputBg,
+                    color: text,
+                    fontSize: '13px',
+                    outline: 'none'
+                  }}
+                />
+                {agentSearchQuery && (
+                  <button
+                    onClick={() => setAgentSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: muted,
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      padding: 0
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Tabs */}
+              <div style={{ display: 'flex', gap: '4px', backgroundColor: isDarkMode ? '#0f172a' : '#e2e8f0', padding: '3px', borderRadius: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'with_feedback', label: `💬 With Feedback (${agentsWithFeedback.length})` },
+                  { id: 'needs_attention', label: `⚠️ Needs Attention (${allAvailableAgents.filter(a => a.negativeCount > 0 && (!filterExcludeDashboards || !a.isDashboard)).length})` },
+                  { id: 'custom_studio', label: `🤖 Studio Only (${allAvailableAgents.filter(a => a.isStudioAgent).length})` },
+                  { id: 'all', label: `All (${filteredAgents.length})` }
+                ].map(chip => (
+                  <button
+                    key={chip.id}
+                    onClick={() => setAgentFilterTab(chip.id)}
+                    style={{
+                      padding: '5px 10px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      backgroundColor: agentFilterTab === chip.id ? primary : 'transparent',
+                      color: agentFilterTab === chip.id ? '#ffffff' : text,
+                      fontSize: '12px',
+                      fontWeight: agentFilterTab === chip.id ? '600' : '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Hide Dashboard Sessions Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', userSelect: 'none', color: text, fontWeight: '500' }}>
+                <input
+                  type="checkbox"
+                  checked={filterExcludeDashboards}
+                  onChange={(e) => {
+                    setFilterExcludeDashboards(e.target.checked);
+                    setTablePage(1);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span>Hide Dashboard Sessions</span>
+              </label>
+              <span
+                title="Conversations initiated on Looker Dashboards create synthetic sessions (e.g. cymbal_pets::business_pulse). They are ad-hoc queries, not editable Agent Studio agents. Keep this checked to focus only on your real agents."
+                style={{ cursor: 'help', fontSize: '13px', color: muted }}
+              >
+                ℹ️
+              </span>
+            </div>
+          </div>
+
+          {/* Searchable Combobox Select + Quick Select Row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+            <label style={{ fontSize: '13px', fontWeight: '600', color: text, whiteSpace: 'nowrap' }}>Active Model:</label>
+            <select
+              value={selectedAgentId}
+              onChange={(e) => handleSelectAgent(e.target.value)}
+              disabled={loading}
+              style={{
+                flex: 1,
+                minWidth: '280px',
+                padding: '9px 12px',
+                borderRadius: '8px',
+                border: `1px solid ${border}`,
+                backgroundColor: inputBg,
+                color: text,
+                fontSize: '13px',
+                outline: 'none',
+                fontWeight: '500'
+              }}
+            >
+              <option value="All">🌐 All Models & Agents ({masterTelemetryRows.length || telemetryRows.length} total queries)</option>
+              {filteredAgents.map(a => {
+                const badge = a.feedbackCount > 0 
+                  ? `[${a.feedbackCount} feedback${a.negativeCount > 0 ? ` • ${a.negativeCount} 👎` : ' • 👍'}]`
+                  : '[0 feedback]';
+                const typeLabel = a.isStudioAgent ? 'Agent Studio' : (a.isDashboard ? 'Dashboard Session' : 'General');
+                return (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {badge} ({typeLabel})
+                  </option>
+                );
+              })}
+            </select>
+
+            {selectedAgentId !== 'All' && (
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: `1px solid ${border}`,
+                  color: primary,
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                ✕ Clear Selection
+              </button>
+            )}
+          </div>
+
+          {/* Quick-Select Feedback Pills Bar */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: muted }}>
+                Quick Select: Models with Live Feedback
+              </span>
+              <span style={{ fontSize: '11px', color: muted }}>
+                Click any model to isolate its feedback & telemetry
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', scrollbarWidth: 'thin' }}>
+              {/* All Models Pill */}
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '16px',
+                  border: selectedAgentId === 'All' ? `2px solid ${primary}` : `1px solid ${border}`,
+                  backgroundColor: selectedAgentId === 'All' ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                  color: selectedAgentId === 'All' ? primary : text,
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: selectedAgentId === 'All' ? '700' : '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                <span>🌐 All Overview</span>
+                <span style={{
+                  backgroundColor: selectedAgentId === 'All' ? primary : (isDarkMode ? '#334155' : '#e2e8f0'),
+                  color: selectedAgentId === 'All' ? '#ffffff' : text,
+                  padding: '1px 6px',
+                  borderRadius: '10px',
+                  fontSize: '11px',
+                  fontWeight: '700'
+                }}>
+                  {masterTelemetryRows.length || telemetryRows.length}
+                </span>
+              </button>
+
+              {/* Agent Pills */}
+              {agentsWithFeedback.slice(0, 20).map(a => {
+                const isSelected = String(selectedAgentId) === String(a.id);
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => handleSelectAgent(a.id)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: '16px',
+                      border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
+                      backgroundColor: isSelected ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                      color: isSelected ? primary : text,
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: isSelected ? '700' : '500',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
+                    }}
+                    title={`${a.name} • ${a.feedbackCount} total queries • ${a.negativeCount} negative feedback`}
+                  >
+                    <span>{a.isDashboard ? '📊' : '🤖'} {a.name}</span>
+                    <span style={{
+                      backgroundColor: isSelected ? primary : (a.negativeCount > 0 ? '#fee2e2' : (isDarkMode ? '#334155' : '#e2e8f0')),
+                      color: isSelected ? '#ffffff' : (a.negativeCount > 0 ? '#b91c1c' : text),
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      fontSize: '11px',
+                      fontWeight: '700'
+                    }}>
+                      {a.feedbackCount}
+                    </span>
+                    {a.negativeCount > 0 && <span style={{ fontSize: '11px' }}>⚠️</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active Model Banner */}
+          {selectedAgentId !== 'All' && (
+            <div style={{
+              marginTop: '12px',
+              padding: '8px 12px',
               borderRadius: '8px',
-              border: `1px solid ${border}`,
-              backgroundColor: inputBg,
-              color: text,
-              fontSize: '14px',
-              outline: 'none'
-            }}
-          >
-            <option value="All">All Agents (Overview)</option>
-            {agents.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.name || a.id} {a.id.startsWith('fake_') ? '(Sample)' : '(Looker API)'}
-              </option>
-            ))}
-          </select>
+              backgroundColor: isDarkMode ? '#0f172a' : '#eff6ff',
+              border: `1px solid ${isDarkMode ? '#334155' : '#bfdbfe'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              fontSize: '12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '14px' }}>🎯</span>
+                <span>Active Filter: <strong style={{ color: text }}>{editName || selectedAgentId}</strong></span>
+                <span style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: currentAgent?.isDashboard ? '#fef3c7' : '#dbeafe',
+                  color: currentAgent?.isDashboard ? '#92400e' : '#1e40af',
+                  fontWeight: '600'
+                }}>
+                  {currentAgent?.isDashboard ? 'Dashboard Session' : 'Agent Studio Agent'}
+                </span>
+                <span style={{ color: muted }}>
+                  &bull; {telemetryRows.length} matching feedback queries
+                </span>
+              </div>
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: primary,
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  padding: 0
+                }}
+              >
+                ✕ View All Models
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -655,26 +1108,71 @@ export const App = ({ isStandalone = false }) => {
               <div>
                 <span style={{ fontWeight: '700', fontSize: '15px' }}>Live Telemetry & Conversation Feedback</span>
                 <span style={{ fontSize: '12px', color: muted, marginLeft: '8px' }}>
-                  ({sortedTelemetryRows.length} recent queries &bull; Click headers to sort &bull; Drag column dividers to resize)
+                  ({totalTableRows} matching queries &bull; Click headers to sort &bull; Drag column dividers to resize)
                 </span>
               </div>
-              {selectedAgentId !== 'All' && (
-                <button
-                  onClick={() => handleSelectAgent('All')}
-                  style={{
-                    backgroundColor: 'transparent',
-                    border: `1px solid ${border}`,
-                    color: primary,
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    fontWeight: '600'
-                  }}
-                >
-                  ← Show All Agents
-                </button>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    placeholder="🔍 Filter messages in table..."
+                    value={tableSearchQuery}
+                    onChange={(e) => {
+                      setTableSearchQuery(e.target.value);
+                      setTablePage(1);
+                    }}
+                    style={{
+                      padding: '6px 28px 6px 12px',
+                      borderRadius: '6px',
+                      border: `1px solid ${border}`,
+                      backgroundColor: inputBg,
+                      color: text,
+                      fontSize: '12px',
+                      width: '210px',
+                      outline: 'none'
+                    }}
+                  />
+                  {tableSearchQuery && (
+                    <button
+                      onClick={() => {
+                        setTableSearchQuery('');
+                        setTablePage(1);
+                      }}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: muted,
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        padding: 0
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                {selectedAgentId !== 'All' && (
+                  <button
+                    onClick={() => handleSelectAgent('All')}
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: `1px solid ${border}`,
+                      color: primary,
+                      borderRadius: '6px',
+                      padding: '5px 12px',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      fontWeight: '600'
+                    }}
+                  >
+                    ← Show All Agents
+                  </button>
+                )}
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto', width: '100%' }}>
@@ -743,7 +1241,14 @@ export const App = ({ isStandalone = false }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedTelemetryRows.map((r, idx) => {
+                  {paginatedTelemetryRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={TABLE_COLUMNS.length} style={{ padding: '40px', textAlign: 'center', color: muted, fontSize: '14px' }}>
+                        No matching conversation feedback queries found. Try adjusting filters or selecting another model.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedTelemetryRows.map((r, idx) => {
                     const { displayName, targetId } = getAgentInfo(r);
                     const isSuccess = r['conversation_sa_telemetry.answer_success'] === 'Yes' ||
                       r['conversation_sa_telemetry.answer_success'] === 'Success' ||
@@ -915,11 +1420,173 @@ export const App = ({ isStandalone = false }) => {
                         </td>
                       </tr>
                     );
-                  })}
+                  }))}
                 </tbody>
               </table>
             </div>
-          </div>        </div>
+
+            {/* Pagination Controls Footer */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 20px',
+              borderTop: `1px solid ${border}`,
+              backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+              flexWrap: 'wrap',
+              gap: '12px',
+              fontSize: '13px'
+            }}>
+              {/* Left Side: Summary & Page Size selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <span style={{ color: muted }}>
+                  Showing <strong style={{ color: text }}>{totalTableRows === 0 ? 0 : startRowIdx + 1}</strong> to{' '}
+                  <strong style={{ color: text }}>{endRowIdx}</strong> of{' '}
+                  <strong style={{ color: text }}>{totalTableRows}</strong> feedback entries
+                </span>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ color: muted, fontSize: '12px' }}>Rows per page:</label>
+                  <select
+                    value={tablePageSize}
+                    onChange={(e) => {
+                      setTablePageSize(Number(e.target.value));
+                      setTablePage(1);
+                    }}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: `1px solid ${border}`,
+                      backgroundColor: inputBg,
+                      color: text,
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={-1}>All ({totalTableRows})</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Right Side: Page Navigation Buttons */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  onClick={() => setTablePage(1)}
+                  disabled={safeCurrentPage <= 1}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: safeCurrentPage <= 1 ? (isDarkMode ? '#334155' : '#e2e8f0') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                    color: safeCurrentPage <= 1 ? muted : text,
+                    cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '600'
+                  }}
+                  title="First Page"
+                >
+                  « First
+                </button>
+
+                <button
+                  onClick={() => setTablePage(prev => Math.max(1, prev - 1))}
+                  disabled={safeCurrentPage <= 1}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: safeCurrentPage <= 1 ? (isDarkMode ? '#334155' : '#e2e8f0') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                    color: safeCurrentPage <= 1 ? muted : text,
+                    cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '600'
+                  }}
+                >
+                  ‹ Prev
+                </button>
+
+                {/* Page Number indicator & quick jumps */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', margin: '0 4px' }}>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPages || Math.abs(p - safeCurrentPage) <= 1)
+                    .reduce((acc, p, idx, arr) => {
+                      if (idx > 0 && p - arr[idx - 1] > 1) {
+                        acc.push('...');
+                      }
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((item, idx) => {
+                      if (item === '...') {
+                        return <span key={`ellipsis-${idx}`} style={{ color: muted, padding: '0 4px' }}>…</span>;
+                      }
+                      const isCurr = item === safeCurrentPage;
+                      return (
+                        <button
+                          key={item}
+                          onClick={() => setTablePage(item)}
+                          style={{
+                            minWidth: '28px',
+                            height: '28px',
+                            padding: '0 6px',
+                            borderRadius: '6px',
+                            border: isCurr ? `1px solid ${primary}` : `1px solid ${border}`,
+                            backgroundColor: isCurr ? primary : (isDarkMode ? '#0f172a' : '#ffffff'),
+                            color: isCurr ? '#ffffff' : text,
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: isCurr ? '700' : '500'
+                          }}
+                        >
+                          {item}
+                        </button>
+                      );
+                    })}
+                </div>
+
+                <button
+                  onClick={() => setTablePage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={safeCurrentPage >= totalPages}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: safeCurrentPage >= totalPages ? (isDarkMode ? '#334155' : '#e2e8f0') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                    color: safeCurrentPage >= totalPages ? muted : text,
+                    cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '600'
+                  }}
+                >
+                  Next ›
+                </button>
+
+                <button
+                  onClick={() => setTablePage(totalPages)}
+                  disabled={safeCurrentPage >= totalPages}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: safeCurrentPage >= totalPages ? (isDarkMode ? '#334155' : '#e2e8f0') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                    color: safeCurrentPage >= totalPages ? muted : text,
+                    cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer',
+                    fontSize: '12px',
+                    fontWeight: '600'
+                  }}
+                  title="Last Page"
+                >
+                  Last »
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* TAB 2: Agent Details & Live Preview */}
@@ -930,7 +1597,27 @@ export const App = ({ isStandalone = false }) => {
               <p style={{ fontSize: '16px', color: muted }}>Please select a specific agent from the dropdown above to view and optimize its live configuration.</p>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+            <div>
+              {currentAgent?.isDashboard && (
+                <div style={{
+                  backgroundColor: isDarkMode ? '#1e293b' : '#fef3c7',
+                  border: `1px solid ${isDarkMode ? '#334155' : '#fde68a'}`,
+                  color: isDarkMode ? '#fde68a' : '#92400e',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  marginBottom: '16px',
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <span style={{ fontSize: '18px' }}>ℹ️</span>
+                  <div>
+                    <strong>Dashboard Conversational Session:</strong> This entry is an ad-hoc conversational session created when users interact with a Looker Dashboard (<code>{editName}</code>). Telemetry and user feedback ratings are fully analyzed in the <strong>Analytics & Feedback</strong> tab. System instructions and tool configurations are managed via LookML models or dedicated Agent Studio agents.
+                  </div>
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
               
               {/* Left Panel: Real Agent Configuration */}
               <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '24px' }}>
@@ -1117,6 +1804,7 @@ export const App = ({ isStandalone = false }) => {
                   </button>
                 </div>
               </div>
+            </div>
             </div>
           )}
         </div>
