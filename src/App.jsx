@@ -2050,22 +2050,25 @@ export const App = ({ isStandalone = false }) => {
                       <span>⚡ BigQuery ML</span>
                     </button>
                     <button
-                      onClick={() => setOptimizerBackend('cloud_run')}
+                      disabled={true}
+                      title="Cloud Run service is decommissioned in favor of BigQuery ML"
                       style={{
                         padding: '4px 12px',
                         borderRadius: '4px',
                         border: 'none',
                         fontSize: '12px',
-                        fontWeight: optimizerBackend === 'cloud_run' ? '700' : '400',
-                        backgroundColor: optimizerBackend === 'cloud_run' ? primary : 'transparent',
-                        color: optimizerBackend === 'cloud_run' ? '#ffffff' : text,
-                        cursor: 'pointer',
+                        fontWeight: '400',
+                        backgroundColor: 'transparent',
+                        color: muted,
+                        cursor: 'not-allowed',
+                        opacity: 0.5,
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px'
                       }}
                     >
                       <span>☁️ Cloud Run</span>
+                      <span style={{ fontSize: '10px', fontStyle: 'italic' }}>(Disabled)</span>
                     </button>
                   </div>
                 </div>
