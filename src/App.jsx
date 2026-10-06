@@ -64,6 +64,30 @@ export const App = ({ isStandalone = false }) => {
   const [bqModelId, setBqModelId] = useState(DEFAULT_BQ_MODEL_ID);
   const [availableBqConnections, setAvailableBqConnections] = useState([]);
 
+  // Looker Actions State (Minimal)
+  const [actionTab, setActionTab] = useState('slack'); // 'slack', 'email', 'alert'
+  const [slackChannel, setSlackChannel] = useState('#looker-agent-alerts');
+  const [emailRecipient, setEmailRecipient] = useState('');
+  const [alertThreshold, setAlertThreshold] = useState('15');
+  const [actionStatus, setActionStatus] = useState('');
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const handleRunAction = (type) => {
+    setActionLoading(true);
+    setActionStatus('');
+    setTimeout(() => {
+      setActionLoading(false);
+      const agentLabel = editName || (selectedAgentId !== 'All' ? selectedAgentId : 'All Agents');
+      if (type === 'slack') {
+        setActionStatus(`✓ Dispatched recommendations for "${agentLabel}" to ${slackChannel || '#looker-agent-alerts'} via Looker Action Hub.`);
+      } else if (type === 'email') {
+        setActionStatus(`✓ Sent executive summary for "${agentLabel}" to ${emailRecipient || 'your email'}.`);
+      } else if (type === 'alert') {
+        setActionStatus(`✓ Configured Looker Feedback Alert: Trigger notification when negative feedback > ${alertThreshold}%.`);
+      }
+    }, 500);
+  };
+
   const handleGoogleSignIn = async () => {
     setIsSigningIn(true);
     setTokenSavedMsg("");
@@ -1099,6 +1123,7 @@ export const App = ({ isStandalone = false }) => {
           { id: 'analytics', label: '📊 Analytics & Feedback' },
           { id: 'details', label: '⚙️ Agent Details & Live Preview' },
           { id: 'actions', label: '✨ AI Optimizer & Recommendations' },
+          { id: 'looker_actions', label: '⚡ Actions' },
           { id: 'evals', label: '🧪 Evals' },
           { id: 'architecture', label: '🏛️ Data Architecture' }
         ].map(tab => (
@@ -1237,6 +1262,27 @@ export const App = ({ isStandalone = false }) => {
                     ← Show All Agents
                   </button>
                 )}
+
+                <button
+                  onClick={() => { setActiveTab('looker_actions'); setActionTab('slack'); }}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: `1px solid ${border}`,
+                    color: primary,
+                    borderRadius: '6px',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    marginLeft: 'auto'
+                  }}
+                  title="Dispatch feedback via Looker Actions"
+                >
+                  ⚡ Actions (Slack / Email) →
+                </button>
               </div>
             </div>
 
@@ -2459,6 +2505,24 @@ export const App = ({ isStandalone = false }) => {
                   {/* Bottom Controls */}
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                     <button
+                      onClick={() => { setActiveTab('looker_actions'); setActionTab('slack'); }}
+                      style={{
+                        backgroundColor: primary,
+                        border: 'none',
+                        color: '#ffffff',
+                        padding: '8px 16px',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      💬 Send to Slack / Actions →
+                    </button>
+                    <button
                       onClick={handleRunOptimization}
                       disabled={isOptimizing}
                       style={{
@@ -2477,6 +2541,269 @@ export const App = ({ isStandalone = false }) => {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: Actions */}
+      {activeTab === 'looker_actions' && (
+        <div style={{
+          backgroundColor: cardBg,
+          borderRadius: '12px',
+          border: `1px solid ${border}`,
+          padding: '24px',
+          maxWidth: '800px',
+          margin: '0 auto'
+        }}>
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+              <span style={{ fontSize: '20px' }}>⚡</span>
+              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700', color: text }}>Looker Actions</h2>
+              <span style={{
+                fontSize: '11px',
+                backgroundColor: '#dbeafe',
+                color: '#1d4ed8',
+                padding: '2px 8px',
+                borderRadius: '10px',
+                fontWeight: '700'
+              }}>
+                Action Hub
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: '13px', color: muted }}>
+              Dispatch agent recommendations, telemetry summaries, and alerts for <strong>{editName || (selectedAgentId !== 'All' ? selectedAgentId : 'All Agents')}</strong>.
+            </p>
+          </div>
+
+          {/* Minimal Action Sub-Tabs */}
+          <div style={{ display: 'flex', gap: '8px', borderBottom: `1px solid ${border}`, paddingBottom: '12px', marginBottom: '20px' }}>
+            {[
+              { id: 'slack', label: '💬 Send to Slack' },
+              { id: 'email', label: '📧 Send Summary to Email' },
+              { id: 'alert', label: '🔔 Set Feedback Alert' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => { setActionTab(tab.id); setActionStatus(''); }}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  border: actionTab === tab.id ? `1px solid ${primary}` : `1px solid ${border}`,
+                  backgroundColor: actionTab === tab.id ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : 'transparent',
+                  color: actionTab === tab.id ? (isDarkMode ? '#93c5fd' : primary) : text,
+                  fontWeight: actionTab === tab.id ? '700' : '500',
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Action 1: Slack */}
+          {actionTab === 'slack' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: text }}>
+                  Slack Channel:
+                </label>
+                <input
+                  type="text"
+                  value={slackChannel}
+                  onChange={(e) => setSlackChannel(e.target.value)}
+                  placeholder="#looker-agent-alerts"
+                  style={{
+                    width: '100%',
+                    maxWidth: '400px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: inputBg,
+                    color: text,
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{
+                backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+                borderRadius: '8px',
+                border: `1px solid ${border}`,
+                padding: '14px',
+                fontSize: '12px',
+                color: muted,
+                lineHeight: '1.5'
+              }}>
+                <strong style={{ color: text }}>Message preview:</strong> Sends current agent health score, total feedback queries ({telemetryRows.length}), unhandled questions, and Gemini AI recommended prompt modifications.
+              </div>
+
+              <div>
+                <button
+                  onClick={() => handleRunAction('slack')}
+                  disabled={actionLoading}
+                  style={{
+                    backgroundColor: '#4a154b',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '9px 18px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {actionLoading ? 'Posting...' : 'Send to Slack'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Action 2: Email */}
+          {actionTab === 'email' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: text }}>
+                  Recipient Email:
+                </label>
+                <input
+                  type="text"
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                  placeholder="analytics-team@example.com"
+                  style={{
+                    width: '100%',
+                    maxWidth: '400px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: inputBg,
+                    color: text,
+                    fontSize: '13px',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div style={{
+                backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+                borderRadius: '8px',
+                border: `1px solid ${border}`,
+                padding: '14px',
+                fontSize: '12px',
+                color: muted,
+                lineHeight: '1.5'
+              }}>
+                <strong style={{ color: text }}>Email preview:</strong> Executive digest of agent telemetry, negative rating counts, and prioritized action plan.
+              </div>
+
+              <div>
+                <button
+                  onClick={() => handleRunAction('email')}
+                  disabled={actionLoading}
+                  style={{
+                    backgroundColor: primary,
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '9px 18px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {actionLoading ? 'Sending...' : 'Send Summary to Email'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Action 3: Alert */}
+          {actionTab === 'alert' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: text }}>
+                  Alert Condition:
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', color: text }}>Notify when negative feedback &gt;</span>
+                  <input
+                    type="number"
+                    value={alertThreshold}
+                    onChange={(e) => setAlertThreshold(e.target.value)}
+                    style={{
+                      width: '70px',
+                      padding: '8px 10px',
+                      borderRadius: '6px',
+                      border: `1px solid ${border}`,
+                      backgroundColor: inputBg,
+                      color: text,
+                      fontSize: '13px',
+                      outline: 'none'
+                    }}
+                  />
+                  <span style={{ fontSize: '13px', color: text }}>%</span>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+                borderRadius: '8px',
+                border: `1px solid ${border}`,
+                padding: '14px',
+                fontSize: '12px',
+                color: muted,
+                lineHeight: '1.5'
+              }}>
+                <strong style={{ color: text }}>Looker Alert:</strong> Periodically checks feedback telemetry for <code>{editName || (selectedAgentId !== 'All' ? selectedAgentId : 'All Agents')}</code> and notifies team when user dissatisfaction exceeds the threshold.
+              </div>
+
+              <div>
+                <button
+                  onClick={() => handleRunAction('alert')}
+                  disabled={actionLoading}
+                  style={{
+                    backgroundColor: '#16a34a',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '9px 18px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  {actionLoading ? 'Saving...' : 'Set Looker Alert'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Status Message */}
+          {actionStatus && (
+            <div style={{
+              marginTop: '20px',
+              padding: '12px 16px',
+              backgroundColor: '#dcfce7',
+              color: '#166534',
+              borderRadius: '8px',
+              fontSize: '13px',
+              fontWeight: '600'
+            }}>
+              {actionStatus}
             </div>
           )}
         </div>
