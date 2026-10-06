@@ -78,7 +78,7 @@ const Root = () => {
   return (
     <ErrorBoundary>
       <ExtensionProvider40
-        chattyTimeout={120000}
+        chattyTimeout={30000}
         loadingComponent={<LoadingFallback />}
       >
         <ComponentsProvider>
