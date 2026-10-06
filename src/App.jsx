@@ -164,6 +164,7 @@ export const App = ({ isStandalone = false }) => {
   // Model Selector Filter & Search State
   const [agentSearchQuery, setAgentSearchQuery] = useState('');
   const [agentFilterTab, setAgentFilterTab] = useState('with_feedback'); // 'with_feedback', 'needs_attention', 'custom_studio', 'all'
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   // Table Sorting & Column Widths
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
@@ -746,16 +747,72 @@ export const App = ({ isStandalone = false }) => {
           </button>
         </div>
 
-        {/* Revamped Agent Selector & Filter Panel */}
+        {/* Revamped Agent Selector & Filter Panel (Collapsible) */}
         <div style={{
           backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
           borderRadius: '10px',
           border: `1px solid ${border}`,
-          padding: '16px',
-          marginTop: '12px'
+          padding: isFiltersOpen ? '14px 16px' : '10px 16px',
+          marginTop: '12px',
+          transition: 'all 0.2s ease'
         }}>
-          {/* Top Control Bar: Search Input, Filter Tabs, and Hide Dashboards Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+          {/* Collapsible Header */}
+          <div
+            onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer',
+              userSelect: 'none',
+              paddingBottom: isFiltersOpen ? '12px' : '0',
+              borderBottom: isFiltersOpen ? `1px solid ${border}` : 'none'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', fontWeight: '700', color: text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{isFiltersOpen ? '▾' : '▸'}</span> Model & Telemetry Filters
+              </span>
+              <span style={{
+                fontSize: '12px',
+                padding: '2px 8px',
+                borderRadius: '12px',
+                backgroundColor: isDarkMode ? '#334155' : '#e2e8f0',
+                color: text,
+                fontWeight: '500'
+              }}>
+                Active: <strong>{selectedAgentId === 'All' ? '🌐 All Models' : (editName || selectedAgentId)}</strong>
+              </span>
+            </div>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsFiltersOpen(!isFiltersOpen);
+              }}
+              style={{
+                backgroundColor: 'transparent',
+                border: `1px solid ${border}`,
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '12px',
+                color: muted,
+                cursor: 'pointer',
+                fontWeight: '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {isFiltersOpen ? '▲ Collapse Filters' : '▼ Expand Filters'}
+            </button>
+          </div>
+
+          {/* Collapsible Filters Content */}
+          {isFiltersOpen && (
+            <div style={{ marginTop: '14px' }}>
+              {/* Top Control Bar: Search Input, Filter Tabs, and Hide Dashboards Toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '300px', flexWrap: 'wrap' }}>
               {/* Search text input */}
               <div style={{ position: 'relative', width: '240px' }}>
@@ -1034,6 +1091,8 @@ export const App = ({ isStandalone = false }) => {
               >
                 ✕ View All Models
               </button>
+            </div>
+          )}
             </div>
           )}
         </div>
