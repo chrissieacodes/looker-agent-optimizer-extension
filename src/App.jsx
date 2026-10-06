@@ -821,7 +821,7 @@ export const App = ({ isStandalone = false }) => {
           <div>
             <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: text }}>Agent Feedback Optimizer</h1>
             <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: muted }}>
-              Looker Extension Framework • Real-time Looker API & Agent Optimization
+              Real-time Looker API & Agent Optimization
             </p>
           </div>
           <button
@@ -1209,7 +1209,7 @@ export const App = ({ isStandalone = false }) => {
               <div>
                 <span style={{ fontWeight: '700', fontSize: '15px' }}>Live Telemetry & Conversation Feedback</span>
                 <span style={{ fontSize: '12px', color: muted, marginLeft: '8px' }}>
-                  ({totalTableRows} matching queries &bull; Click headers to sort &bull; Drag column dividers to resize)
+                  ({totalTableRows} matching queries)
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -1733,7 +1733,7 @@ export const App = ({ isStandalone = false }) => {
         <div>
           {selectedAgentId === 'All' ? (
             <div style={{ backgroundColor: cardBg, padding: '24px', borderRadius: '12px', border: `1px solid ${border}`, textAlign: 'center' }}>
-              <p style={{ fontSize: '16px', color: muted }}>Please select a specific agent from the dropdown above to view and optimize its live configuration.</p>
+              <p style={{ fontSize: '16px', color: muted }}>Please select a specific agent from the dropdown above to edit its live configuration.</p>
             </div>
           ) : (
             <div>
