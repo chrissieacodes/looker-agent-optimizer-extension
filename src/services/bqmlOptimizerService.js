@@ -8,7 +8,7 @@
  */
 
 // Default configuration constants (can be overridden via environment, user attributes, or UI)
-export const DEFAULT_BQ_CONNECTION = 'bigquery';
+export const DEFAULT_BQ_CONNECTION = 'default_bigquery_connection';
 export const DEFAULT_BQ_MODEL_ID = 'cloud-looker-devrel-demos.agent_optimizer_us.gemini_model';
 
 /**
@@ -139,17 +139,19 @@ export function parseBqmlResponse(rawText) {
  * Discovers available BigQuery connections in Looker.
  */
 export async function getBigQueryConnections(coreSDK) {
+  const fallback = [{ name: 'default_bigquery_connection', dialect_name: 'bigquery_standard_sql' }];
   try {
     if (!coreSDK || !coreSDK.all_connections) {
-      return [];
+      return fallback;
     }
     const connections = await coreSDK.ok(coreSDK.all_connections({ fields: 'name,dialect_name' }));
-    return (connections || []).filter(c => 
+    const bqConns = (connections || []).filter(c => 
       c.dialect_name && (c.dialect_name.toLowerCase().includes('bigquery') || c.dialect_name.toLowerCase().includes('google_bigquery'))
     );
+    return bqConns.length > 0 ? bqConns : fallback;
   } catch (err) {
-    console.warn('[BQML Optimizer] Failed to list Looker connections:', err);
-    return [];
+    console.warn('[BQML Optimizer] Failed to list Looker connections, using default:', err);
+    return fallback;
   }
 }
 
@@ -160,8 +162,8 @@ export async function getBigQueryConnections(coreSDK) {
  * @param {Object} params.coreSDK - Looker Core 4.0 SDK instance (from ExtensionContext)
  * @param {Object} params.agentConfig - Agent configuration object (name, instructions, explores, etc.)
  * @param {Array} params.telemetryRows - Feedback & telemetry message rows
- * @param {string} [params.connectionName] - Looker connection name pointing to BigQuery (default: 'bigquery')
- * @param {string} [params.modelId] - BigQuery remote model identifier (e.g. 'my_project.my_dataset.gemini_model')
+ * @param {string} [params.connectionName] - Looker connection name pointing to BigQuery (default: 'default_bigquery_connection')
+ * @param {string} [params.modelId] - BigQuery remote model identifier (e.g. 'cloud-looker-devrel-demos.agent_optimizer_us.gemini_model')
  * @param {Object} [params.modelParams] - Optional parameters for ML.GENERATE_TEXT
  * @returns {Promise<Object>} Structured optimization report
  */
@@ -177,24 +179,40 @@ export async function requestBqmlAgentOptimization({
     throw new Error('Looker coreSDK is required to execute BigQuery ML queries.');
   }
 
-  console.info(`[BQML Optimizer] Preparing optimization via connection "${connectionName}" and model "${modelId}"...`);
+  // Sanitize target connection: if legacy 'bigquery' or empty, use 'default_bigquery_connection'
+  const targetConnection = (connectionName && connectionName.trim() && connectionName.trim() !== 'bigquery')
+    ? connectionName.trim()
+    : DEFAULT_BQ_CONNECTION;
+
+  console.info(`[BQML Optimizer] Preparing optimization via connection "${targetConnection}" and model "${modelId}"...`);
 
   const prompt = buildAgentOptimizerPrompt(agentConfig, telemetryRows);
   const sql = generateBqmlSQL(modelId, prompt, modelParams);
 
-  // 1. Create SQL Query in Looker
+  // 1. Create SQL Query in Looker (with automatic fallback to model_name)
   let querySlug;
   try {
     const createQueryResponse = await coreSDK.ok(
       coreSDK.create_sql_query({
-        connection_name: connectionName,
+        connection_name: targetConnection,
         sql
       })
     );
     querySlug = createQueryResponse.slug;
   } catch (err) {
-    console.error('[BQML Optimizer] Failed to create SQL query via Looker Core API:', err);
-    throw new Error(`Looker create_sql_query failed on connection "${connectionName}": ${err.message || err}`);
+    console.warn(`[BQML Optimizer] Failed on connection "${targetConnection}", falling back to model_name "agent_optimizer":`, err);
+    try {
+      const fallbackResponse = await coreSDK.ok(
+        coreSDK.create_sql_query({
+          model_name: 'agent_optimizer',
+          sql
+        })
+      );
+      querySlug = fallbackResponse.slug;
+    } catch (fallbackErr) {
+      console.error('[BQML Optimizer] Failed to create SQL query via Looker Core API:', fallbackErr);
+      throw new Error(`Looker create_sql_query failed: ${fallbackErr.message || err.message || fallbackErr}`);
+    }
   }
 
   if (!querySlug) {
