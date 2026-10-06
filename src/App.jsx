@@ -1121,8 +1121,8 @@ export const App = ({ isStandalone = false }) => {
       <div style={{ display: 'flex', gap: '8px', borderBottom: `1px solid ${border}`, marginBottom: '24px', flexWrap: 'wrap' }}>
         {[
           { id: 'analytics', label: '📊 Analytics & Feedback' },
-          { id: 'details', label: '⚙️ Agent Details & Live Preview' },
-          { id: 'actions', label: '✨ AI Optimizer & Recommendations' },
+          { id: 'actions', label: '✨ AI Recommendations' },
+          { id: 'details', label: '✏️ Edit Agent' },
           { id: 'looker_actions', label: '⚡ Actions' },
           { id: 'evals', label: '🧪 Evals' },
           { id: 'architecture', label: '🏛️ Data Architecture' }
@@ -1969,7 +1969,7 @@ export const App = ({ isStandalone = false }) => {
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
                     <span style={{ fontSize: '24px' }}>🤖</span>
-                    <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>Autonomous AI Instruction Optimizer</h2>
+                    <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>Recommendation Agent</h2>
                     <span style={{
                       backgroundColor: '#dbeafe',
                       color: '#1d4ed8',
@@ -2009,7 +2009,7 @@ export const App = ({ isStandalone = false }) => {
                       transition: 'all 0.2s'
                     }}
                   >
-                    {isOptimizing ? '⏳ Analyzing with Gemini...' : '🚀 Run Autonomous AI Optimization'}
+                    {isOptimizing ? '⏳ Generating Recommendations...' : '✨ Get Optimization Recommendations'}
                   </button>
                 </div>
               </div>
@@ -2303,9 +2303,9 @@ export const App = ({ isStandalone = false }) => {
               {!optimizationReport && !isOptimizing && !optimizationError && (
                 <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '40px 20px', textAlign: 'center' }}>
                   <div style={{ fontSize: '40px', marginBottom: '12px' }}>⚡</div>
-                  <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>Optimizer is Ready to Run</h3>
+                  <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>Recommendation Agent is Ready</h3>
                   <p style={{ margin: '0 auto 20px auto', fontSize: '13px', color: muted, maxWidth: '480px' }}>
-                    Click <strong>"Run Autonomous AI Optimization"</strong> above to trigger the Gemini Flash agent. It will evaluate current user interactions against the agent configuration and deliver structured recommendations.
+                    Click <strong>"Get Optimization Recommendations"</strong> above to trigger the Recommendation Agent. It will evaluate current user interactions against the agent configuration and deliver structured recommendations.
                   </p>
                   <div style={{ display: 'inline-flex', gap: '16px', fontSize: '12px', color: muted }}>
                     <span>• Evaluates Negative Ratings</span>
@@ -2993,9 +2993,39 @@ export const App = ({ isStandalone = false }) => {
             {/* Tab 2 Spec */}
             <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '20px' }}>⚙️</span>
+                <span style={{ fontSize: '20px' }}>✨</span>
                 <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: text }}>
-                  Tab 2: Agent Details & Live Preview
+                  Tab 2: AI Recommendations
+                </h4>
+              </div>
+              <p style={{ fontSize: '13px', color: muted, margin: '0 0 12px 0', lineHeight: '1.5' }}>
+                Autonomous Recommendation Agent that analyzes telemetry failure modes and drafts targeted instruction refinements.
+              </p>
+              <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
+                <strong>Data Source & Engine:</strong> BigQuery ML &bull; Gemini 3.8 Flash
+              </div>
+              <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
+                <strong>Data Generated & Displayed:</strong>
+                <ul style={{ margin: '4px 0 0 16px', padding: 0, color: muted, lineHeight: '1.6' }}>
+                  <li><strong>Performance Score:</strong> 0–100% composite health & precision index.</li>
+                  <li><strong>Diagnostic Themes:</strong> Categorized positive wins, failure patterns, and latency bottlenecks.</li>
+                  <li><strong>Root Cause Analysis:</strong> Detailed diagnostic of prompt ambiguities and schema gaps.</li>
+                  <li><strong>Optimized Prompt Instructions:</strong> Drop-in instruction prompt ready for deployment.</li>
+                  <li><strong>LookML & Tool Recommendations:</strong> Suggestions for PDT pre-aggregation and explore additions.</li>
+                  <li><strong>Prioritized Action Plan:</strong> Step-by-step roadmap for agent tuning.</li>
+                </ul>
+              </div>
+              <div style={{ fontSize: '12px', color: text }}>
+                <strong>Interactive Controls:</strong> <em>"Get Optimization Recommendations"</em> and <em>"Apply Suggested Instructions to Agent"</em>.
+              </div>
+            </div>
+
+            {/* Tab 3 Spec */}
+            <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '20px' }}>✏️</span>
+                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: text }}>
+                  Tab 3: Edit Agent
                 </h4>
               </div>
               <p style={{ fontSize: '13px', color: muted, margin: '0 0 12px 0', lineHeight: '1.5' }}>
@@ -3016,36 +3046,6 @@ export const App = ({ isStandalone = false }) => {
               </div>
               <div style={{ fontSize: '12px', color: text }}>
                 <strong>Interactive Controls:</strong> Live multi-turn Chat Preview testbed and direct <em>"Save to Looker API"</em> deployment button.
-              </div>
-            </div>
-
-            {/* Tab 3 Spec */}
-            <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '20px' }}>✨</span>
-                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: text }}>
-                  Tab 3: AI Optimizer & Recommendations
-                </h4>
-              </div>
-              <p style={{ fontSize: '13px', color: muted, margin: '0 0 12px 0', lineHeight: '1.5' }}>
-                Autonomous reasoning engine that analyzes telemetry failure modes and drafts targeted instruction refinements.
-              </p>
-              <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
-                <strong>Data Source & Engine:</strong> Google Cloud Run &bull; Vertex AI (Gemini 2.5 Flash)
-              </div>
-              <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
-                <strong>Data Generated & Displayed:</strong>
-                <ul style={{ margin: '4px 0 0 16px', padding: 0, color: muted, lineHeight: '1.6' }}>
-                  <li><strong>Performance Score:</strong> 0–100% composite health & precision index.</li>
-                  <li><strong>Diagnostic Themes:</strong> Categorized positive wins, failure patterns, and latency bottlenecks.</li>
-                  <li><strong>Root Cause Analysis:</strong> Detailed diagnostic of prompt ambiguities and schema gaps.</li>
-                  <li><strong>Optimized Prompt Instructions:</strong> Drop-in instruction prompt ready for deployment.</li>
-                  <li><strong>LookML & Tool Recommendations:</strong> Suggestions for PDT pre-aggregation and explore additions.</li>
-                  <li><strong>Prioritized Action Plan:</strong> Step-by-step roadmap for agent tuning.</li>
-                </ul>
-              </div>
-              <div style={{ fontSize: '12px', color: text }}>
-                <strong>Interactive Controls:</strong> 1-click Google OAuth Sign-In, <em>"Run Autonomous AI Optimization"</em>, and <em>"Apply Suggested Instructions to Agent"</em>.
               </div>
             </div>
 
