@@ -1176,9 +1176,10 @@ export const App = ({ isStandalone = false }) => {
                 tableLayout: 'fixed',
                 borderCollapse: 'collapse',
                 textAlign: 'left',
-                fontSize: '13px'
+                fontSize: '13px',
+                color: text
               }}>
-                <thead style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f1f5f9', color: muted }}>
+                <thead style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f1f5f9', color: isDarkMode ? '#cbd5e1' : muted }}>
                   <tr>
                     {TABLE_COLUMNS.map(col => {
                       const isSorted = sortConfig.key === col.id;
@@ -1196,15 +1197,16 @@ export const App = ({ isStandalone = false }) => {
                             userSelect: 'none',
                             cursor: 'pointer',
                             whiteSpace: 'nowrap',
-                            boxSizing: 'border-box'
+                            boxSizing: 'border-box',
+                            color: isSorted ? (isDarkMode ? '#93c5fd' : primary) : (isDarkMode ? '#e2e8f0' : text)
                           }}
                           title={`Click to sort by ${col.label}`}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '8px' }}>
-                            <span style={{ fontWeight: isSorted ? '700' : '600', color: isSorted ? primary : 'inherit' }}>
+                            <span style={{ fontWeight: isSorted ? '700' : '600', color: isSorted ? (isDarkMode ? '#93c5fd' : primary) : (isDarkMode ? '#e2e8f0' : text) }}>
                               {col.label}
                             </span>
-                            <span style={{ fontSize: '11px', color: isSorted ? primary : muted, opacity: isSorted ? 1 : 0.4 }}>
+                            <span style={{ fontSize: '11px', color: isSorted ? (isDarkMode ? '#93c5fd' : primary) : muted, opacity: isSorted ? 1 : 0.4 }}>
                               {sortIcon}
                             </span>
                           </div>
@@ -1234,10 +1236,10 @@ export const App = ({ isStandalone = false }) => {
                     })}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody style={{ color: text }}>
                   {paginatedTelemetryRows.length === 0 ? (
                     <tr>
-                      <td colSpan={TABLE_COLUMNS.length} style={{ padding: '40px', textAlign: 'center', color: muted, fontSize: '14px' }}>
+                      <td colSpan={TABLE_COLUMNS.length} style={{ padding: '40px', textAlign: 'center', color: isDarkMode ? '#94a3b8' : muted, fontSize: '14px' }}>
                         No matching conversation feedback queries found. Try adjusting filters or selecting another model.
                       </td>
                     </tr>
@@ -1251,7 +1253,11 @@ export const App = ({ isStandalone = false }) => {
                       r['conversation_sa_telemetry.health'] === 'success';
 
                     return (
-                      <tr key={idx} style={{ borderBottom: `1px solid ${border}` }}>
+                      <tr key={idx} style={{
+                        borderBottom: `1px solid ${border}`,
+                        color: text,
+                        backgroundColor: idx % 2 === 0 ? 'transparent' : (isDarkMode ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.01)')
+                      }}>
                         {/* Agent Name */}
                         <td style={{
                           width: `${columnWidths.agent}px`,
@@ -1260,7 +1266,8 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: text
                         }} title={displayName}>
                           <button
                             onClick={() => targetId && handleSelectAgent(targetId)}
@@ -1268,7 +1275,7 @@ export const App = ({ isStandalone = false }) => {
                               background: 'none',
                               border: 'none',
                               padding: 0,
-                              color: primary,
+                              color: isDarkMode ? '#60a5fa' : primary,
                               fontWeight: '600',
                               fontSize: '13px',
                               cursor: targetId ? 'pointer' : 'default',
@@ -1286,7 +1293,8 @@ export const App = ({ isStandalone = false }) => {
                               textDecoration: targetId ? 'underline' : 'none',
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap'
+                              whiteSpace: 'nowrap',
+                              color: isDarkMode ? '#93c5fd' : primary
                             }}>
                               {displayName}
                             </span>
@@ -1302,7 +1310,8 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: isDarkMode ? '#e2e8f0' : text
                         }}>
                           {r['conversation.id'] || idx + 1000}
                         </td>
@@ -1315,7 +1324,8 @@ export const App = ({ isStandalone = false }) => {
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: isDarkMode ? '#cbd5e1' : text
                         }} title={r['conversation_sa_telemetry.timestamp'] || ''}>
                           {r['conversation_sa_telemetry.timestamp'] || '2026-10-03'}
                         </td>
@@ -1328,7 +1338,8 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: isDarkMode ? '#f8fafc' : text
                         }} title={r['conversation_sa_telemetry.user_message_truncated'] || ''}>
                           {r['conversation_sa_telemetry.user_message_truncated'] || 'N/A'}
                         </td>
@@ -1341,9 +1352,10 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: text
                         }}>
-                          <span style={{ color: isSuccess ? '#16a34a' : '#ef4444', fontWeight: '600' }}>
+                          <span style={{ color: isSuccess ? (isDarkMode ? '#4ade80' : '#16a34a') : (isDarkMode ? '#f87171' : '#ef4444'), fontWeight: '600' }}>
                             {r['conversation_sa_telemetry.answer_success'] || (isSuccess ? 'Yes' : 'No')}
                           </span>
                         </td>
@@ -1356,15 +1368,17 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: text
                         }}>
                           <span style={{
-                            backgroundColor: isHealthy ? '#dcfce7' : '#fee2e2',
-                            color: isHealthy ? '#15803d' : '#b91c1c',
+                            backgroundColor: isHealthy ? (isDarkMode ? 'rgba(34, 197, 94, 0.18)' : '#dcfce7') : (isDarkMode ? 'rgba(239, 68, 68, 0.18)' : '#fee2e2'),
+                            color: isHealthy ? (isDarkMode ? '#86efac' : '#15803d') : (isDarkMode ? '#fca5a5' : '#b91c1c'),
                             padding: '3px 8px',
                             borderRadius: '4px',
                             fontWeight: '600',
-                            fontSize: '11px'
+                            fontSize: '11px',
+                            border: `1px solid ${isHealthy ? (isDarkMode ? 'rgba(34, 197, 94, 0.35)' : '#bbf7d0') : (isDarkMode ? 'rgba(239, 68, 68, 0.35)' : '#fecaca')}`
                           }}>
                             {r['conversation_sa_telemetry.health'] || (isHealthy ? 'Healthy' : 'Degraded')}
                           </span>
@@ -1378,13 +1392,14 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: text
                         }}>
                           {r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN'
-                            ? <span style={{ color: '#b91c1c', fontWeight: '600' }}>👎 Negative</span>
+                            ? <span style={{ color: isDarkMode ? '#f87171' : '#b91c1c', fontWeight: '600' }}>👎 Negative</span>
                             : r['conversation_sa_telemetry.rating'] === 'THUMBS_UP'
-                            ? <span style={{ color: '#15803d', fontWeight: '600' }}>👍 Positive</span>
-                            : <span style={{ color: muted }}>Unrated</span>}
+                            ? <span style={{ color: isDarkMode ? '#4ade80' : '#15803d', fontWeight: '600' }}>👍 Positive</span>
+                            : <span style={{ color: isDarkMode ? '#94a3b8' : muted }}>Unrated</span>}
                         </td>
 
                         {/* Latency */}
@@ -1395,7 +1410,8 @@ export const App = ({ isStandalone = false }) => {
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: isDarkMode ? '#cbd5e1' : text
                         }}>
                           {r['conversation_sa_telemetry.latency'] ? `${r['conversation_sa_telemetry.latency']} ms` : '800 ms'}
                         </td>
@@ -1408,7 +1424,8 @@ export const App = ({ isStandalone = false }) => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          boxSizing: 'border-box'
+                          boxSizing: 'border-box',
+                          color: isDarkMode ? '#e2e8f0' : text
                         }} title={r['conversation.category'] || ''}>
                           {r['conversation.category'] || 'General'}
                         </td>
@@ -2697,45 +2714,45 @@ export const App = ({ isStandalone = false }) => {
               📋 API & Data Contract Reference
             </div>
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                <thead style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f1f5f9', color: muted }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', color: text }}>
+                <thead style={{ backgroundColor: isDarkMode ? '#1e293b' : '#f1f5f9', color: isDarkMode ? '#cbd5e1' : muted }}>
                   <tr>
-                    <th style={{ padding: '12px 16px' }}>Endpoint / Resource</th>
-                    <th style={{ padding: '12px 16px' }}>Protocol</th>
-                    <th style={{ padding: '12px 16px' }}>Purpose</th>
-                    <th style={{ padding: '12px 16px' }}>Payload / Key Parameters</th>
+                    <th style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Endpoint / Resource</th>
+                    <th style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Protocol</th>
+                    <th style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Purpose</th>
+                    <th style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Payload / Key Parameters</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody style={{ color: text }}>
                   <tr style={{ borderBottom: `1px solid ${border}` }}>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>system__activity / conversations_feedback</td>
-                    <td style={{ padding: '12px 16px' }}>Looker inline_query</td>
-                    <td style={{ padding: '12px 16px' }}>Telemetry & rating stream</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>agent.name, agent.guid, ratings, latency, timestamps</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: isDarkMode ? '#93c5fd' : primary }}>system__activity / conversations_feedback</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Looker inline_query</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Telemetry & rating stream</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#94a3b8' : muted }}>agent.name, agent.guid, ratings, latency, timestamps</td>
                   </tr>
                   <tr style={{ borderBottom: `1px solid ${border}` }}>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>/api/4.0/agents/search</td>
-                    <td style={{ padding: '12px 16px' }}>Core 4.0 GET</td>
-                    <td style={{ padding: '12px 16px' }}>List configured agents</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>limit=100</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: isDarkMode ? '#93c5fd' : primary }}>/api/4.0/agents/search</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Core 4.0 GET</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>List configured agents</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#94a3b8' : muted }}>limit=100</td>
                   </tr>
                   <tr style={{ borderBottom: `1px solid ${border}` }}>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>/api/4.0/agents/{'{'}id{'}'}</td>
-                    <td style={{ padding: '12px 16px' }}>Core 4.0 GET / PATCH</td>
-                    <td style={{ padding: '12px 16px' }}>Fetch & deploy instructions</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>instructions, sources, code_interpreter</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: isDarkMode ? '#93c5fd' : primary }}>/api/4.0/agents/{'{'}id{'}'}</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Core 4.0 GET / PATCH</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Fetch & deploy instructions</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#94a3b8' : muted }}>instructions, sources, code_interpreter</td>
                   </tr>
                   <tr style={{ borderBottom: `1px solid ${border}` }}>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>/api/4.0/conversational_analytics/chat</td>
-                    <td style={{ padding: '12px 16px' }}>Core 4.0 POST</td>
-                    <td style={{ padding: '12px 16px' }}>Interactive preview chat</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>conversation_id, user_message</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: isDarkMode ? '#93c5fd' : primary }}>/api/4.0/conversational_analytics/chat</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Core 4.0 POST</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Interactive preview chat</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#94a3b8' : muted }}>conversation_id, user_message</td>
                   </tr>
                   <tr>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>/api/optimize-agent (Cloud Run)</td>
-                    <td style={{ padding: '12px 16px' }}>Looker fetchProxy (HTTPS)</td>
-                    <td style={{ padding: '12px 16px' }}>Gemini 2.5 Flash optimization</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>Bearer id_token, agentConfig, telemetryRows</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', color: isDarkMode ? '#93c5fd' : primary }}>/api/optimize-agent (Cloud Run / BQML)</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Looker Core 4.0 / BQML SQL</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#e2e8f0' : text }}>Gemini Agent Optimization</td>
+                    <td style={{ padding: '12px 16px', color: isDarkMode ? '#94a3b8' : muted }}>agentConfig, telemetryRows, ML.GENERATE_TEXT</td>
                   </tr>
                 </tbody>
               </table>
