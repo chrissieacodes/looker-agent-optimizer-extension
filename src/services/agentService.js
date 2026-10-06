@@ -368,3 +368,13 @@ export async function requestAgentOptimization(agentConfig, telemetryRows, userA
 }
 
 export const optimizeAgent = requestAgentOptimization;
+
+// BigQuery ML (BQML) Architectural Pattern exports (Explore Assistant pattern)
+export {
+  requestBqmlAgentOptimization,
+  generateBqmlSQL,
+  buildAgentOptimizerPrompt,
+  getBigQueryConnections,
+  DEFAULT_BQ_CONNECTION,
+  DEFAULT_BQ_MODEL_ID
+} from './bqmlOptimizerService';

@@ -22,7 +22,10 @@ application: agent_optimizer {
       "create_golden_query",
       "update_golden_query",
       "delete_golden_query",
-      "all_conversation_messages"
+      "all_conversation_messages",
+      "create_sql_query",
+      "run_sql_query",
+      "all_connections"
     ]
     use_embeds: yes
     use_form_submit: yes

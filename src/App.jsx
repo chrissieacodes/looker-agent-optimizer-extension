@@ -7,7 +7,11 @@ import {
   createConversation,
   sendChatMessage,
   runTelemetryQuery,
-  requestAgentOptimization
+  requestAgentOptimization,
+  requestBqmlAgentOptimization,
+  getBigQueryConnections,
+  DEFAULT_BQ_CONNECTION,
+  DEFAULT_BQ_MODEL_ID
 } from './services/agentService';
 
 // Telemetry Table Column Definitions
@@ -53,6 +57,12 @@ export const App = ({ isStandalone = false }) => {
   const [tokenSavedMsg, setTokenSavedMsg] = useState('');
   const [googleClientId, setGoogleClientId] = useState("82452831399-dijmme0rntvi0d8ro8g24rl9fnbjrq0d.apps.googleusercontent.com");
   const [isSigningIn, setIsSigningIn] = useState(false);
+  
+  // BQML Architecture Settings (Explore Assistant pattern)
+  const [optimizerBackend, setOptimizerBackend] = useState('bqml'); // 'bqml' | 'cloud_run'
+  const [bqConnection, setBqConnection] = useState(DEFAULT_BQ_CONNECTION);
+  const [bqModelId, setBqModelId] = useState(DEFAULT_BQ_MODEL_ID);
+  const [availableBqConnections, setAvailableBqConnections] = useState([]);
 
   const handleGoogleSignIn = async () => {
     setIsSigningIn(true);
@@ -116,6 +126,23 @@ export const App = ({ isStandalone = false }) => {
       }
     }
   }, [extensionSDK]);
+  
+  // Discover available BigQuery connections in Looker for BQML optimization
+  useEffect(() => {
+    if (coreSDK) {
+      getBigQueryConnections(coreSDK)
+        .then((conns) => {
+          if (Array.isArray(conns) && conns.length > 0) {
+            setAvailableBqConnections(conns);
+            // Default to the first found connection if current is not in list
+            if (!conns.some(c => c.name === bqConnection)) {
+              setBqConnection(conns[0].name);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [coreSDK]);
 
 
   // Chat State
@@ -426,21 +453,12 @@ export const App = ({ isStandalone = false }) => {
     }
   };
 
-  // Run autonomous AI optimization agent (Gemini 2.5 Flash)
+  // Run autonomous AI optimization agent (BQML or Cloud Run)
   const handleRunOptimization = async () => {
     if (!selectedAgentId || selectedAgentId === 'All') return;
 
     setIsOptimizing(true);
     setOptimizationError('');
-
-    let activeToken = gcpToken;
-    if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
-      activeToken = await handleGoogleSignIn();
-      if (!activeToken) {
-        setIsOptimizing(false);
-        return;
-      }
-    }
 
     try {
       const agentConfig = {
@@ -452,7 +470,29 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      const report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
+      let report;
+      if (optimizerBackend === 'bqml') {
+        // Execute via BigQuery ML (Explore Assistant Pattern - native Looker Core API, no external servers/IAP required)
+        report = await requestBqmlAgentOptimization({
+          coreSDK,
+          agentConfig,
+          telemetryRows,
+          connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
+          modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
+        });
+      } else {
+        // Execute via Cloud Run backend
+        let activeToken = gcpToken;
+        if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
+          activeToken = await handleGoogleSignIn();
+          if (!activeToken) {
+            setIsOptimizing(false);
+            return;
+          }
+        }
+        report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
+      }
+
       setOptimizationReport(report);
     } catch (err) {
       console.error('Optimization run error:', err);
@@ -1123,7 +1163,9 @@ export const App = ({ isStandalone = false }) => {
                       borderRadius: '12px',
                       textTransform: 'uppercase'
                     }}>
-                      {optimizationReport?.modelUsed ? `Model: ${optimizationReport.modelUsed}` : 'Gemini 2.5 Flash'}
+                      {optimizationReport?.modelUsed 
+                        ? `Model: ${optimizationReport.modelUsed}` 
+                        : (optimizerBackend === 'bqml' ? 'BigQuery ML (Gemini 3.8 Flash)' : 'Cloud Run (Gemini 2.5 Flash)')}
                     </span>
                   </div>
                   <p style={{ margin: 0, fontSize: '14px', color: muted, maxWidth: '650px' }}>
@@ -1151,54 +1193,203 @@ export const App = ({ isStandalone = false }) => {
                       transition: 'all 0.2s'
                     }}
                   >
-                    {isOptimizing ? '⏳ Analyzing with Gemini Flash...' : '🚀 Run Autonomous AI Optimization'}
+                    {isOptimizing ? '⏳ Analyzing with Gemini...' : '🚀 Run Autonomous AI Optimization'}
                   </button>
                 </div>
               </div>
 
-              {/* Cloud Run Connection & Auth Bar */}
+              {/* Architecture Selector Bar */}
               <div style={{
                 backgroundColor: cardBg,
                 borderRadius: '8px',
                 border: `1px solid ${border}`,
                 padding: '12px 18px',
-                marginBottom: '20px',
+                marginBottom: '16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
                 fontSize: '13px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '16px' }}>☁️</span>
-                  <span><strong>Cloud Run Backend:</strong> <code>https://agent-optimizer-backend-ofamr32cra-uc.a.run.app</code></span>
-                  <span style={{
-                    backgroundColor: gcpToken ? '#dcfce7' : '#fef9c3',
-                    color: gcpToken ? '#166534' : '#854d0e',
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '2px 8px',
-                    borderRadius: '10px'
-                  }}>
-                    {gcpToken ? '✓ Auth Token Configured' : 'domain:google.com (requires token)'}
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontWeight: '600' }}>Architecture Pattern:</span>
+                  <div style={{ display: 'flex', backgroundColor: inputBg, borderRadius: '6px', border: `1px solid ${border}`, padding: '2px' }}>
+                    <button
+                      onClick={() => setOptimizerBackend('bqml')}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: optimizerBackend === 'bqml' ? '700' : '400',
+                        backgroundColor: optimizerBackend === 'bqml' ? primary : 'transparent',
+                        color: optimizerBackend === 'bqml' ? '#ffffff' : text,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <span>⚡ BigQuery ML</span>
+                      <span style={{ fontSize: '10px', opacity: 0.8 }}>(Explore Assistant Pattern)</span>
+                    </button>
+                    <button
+                      onClick={() => setOptimizerBackend('cloud_run')}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: optimizerBackend === 'cloud_run' ? '700' : '400',
+                        backgroundColor: optimizerBackend === 'cloud_run' ? primary : 'transparent',
+                        color: optimizerBackend === 'cloud_run' ? '#ffffff' : text,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <span>☁️ Cloud Run</span>
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <button
-                    onClick={() => setShowTokenInput(!showTokenInput)}
-                    style={{
-                      background: 'none',
-                      border: `1px solid ${border}`,
-                      borderRadius: '6px',
-                      padding: '4px 10px',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      color: text
-                    }}
-                  >
-                    {showTokenInput ? 'Close Auth' : '🔑 GCP Auth Token'}
-                  </button>
-                </div>
+
+                {optimizerBackend === 'bqml' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      backgroundColor: '#dcfce7',
+                      color: '#166534',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      padding: '3px 8px',
+                      borderRadius: '10px'
+                    }}>
+                      ✓ Looker Core API (No external servers / No IAP redirect)
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      backgroundColor: gcpToken ? '#dcfce7' : '#fef9c3',
+                      color: gcpToken ? '#166534' : '#854d0e',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      padding: '3px 8px',
+                      borderRadius: '10px'
+                    }}>
+                      {gcpToken ? '✓ Auth Token Configured' : 'domain:google.com (requires token)'}
+                    </span>
+                    <button
+                      onClick={() => setShowTokenInput(!showTokenInput)}
+                      style={{
+                        background: 'none',
+                        border: `1px solid ${border}`,
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        color: text
+                      }}
+                    >
+                      {showTokenInput ? 'Close Auth' : '🔑 GCP Auth Token'}
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {/* BQML Configuration Bar */}
+              {optimizerBackend === 'bqml' && (
+                <div style={{
+                  backgroundColor: cardBg,
+                  borderRadius: '8px',
+                  border: `1px solid ${border}`,
+                  padding: '12px 18px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  flexWrap: 'wrap',
+                  fontSize: '13px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label style={{ fontWeight: '600', color: text }}>BigQuery Connection:</label>
+                    {availableBqConnections.length > 0 ? (
+                      <select
+                        value={bqConnection}
+                        onChange={(e) => setBqConnection(e.target.value)}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          border: `1px solid ${border}`,
+                          fontSize: '12px',
+                          backgroundColor: inputBg,
+                          color: text
+                        }}
+                      >
+                        {availableBqConnections.map(c => (
+                          <option key={c.name} value={c.name}>{c.name} ({c.dialect_name})</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={bqConnection}
+                        onChange={(e) => setBqConnection(e.target.value)}
+                        placeholder="bigquery"
+                        style={{
+                          width: '140px',
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          border: `1px solid ${border}`,
+                          fontSize: '12px',
+                          backgroundColor: inputBg,
+                          color: text
+                        }}
+                      />
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '280px' }}>
+                    <label style={{ fontWeight: '600', color: text }}>Remote Model ID:</label>
+                    <input
+                      type="text"
+                      value={bqModelId}
+                      onChange={(e) => setBqModelId(e.target.value)}
+                      placeholder="project.dataset.gemini_model"
+                      style={{
+                        flex: 1,
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        border: `1px solid ${border}`,
+                        fontSize: '12px',
+                        backgroundColor: inputBg,
+                        color: text
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Cloud Run Connection & Auth Bar */}
+              {optimizerBackend === 'cloud_run' && (
+                <div style={{
+                  backgroundColor: cardBg,
+                  borderRadius: '8px',
+                  border: `1px solid ${border}`,
+                  padding: '12px 18px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '13px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>☁️</span>
+                    <span><strong>Cloud Run Backend:</strong> <code>https://agent-optimizer-backend-ofamr32cra-uc.a.run.app</code></span>
+                  </div>
+                </div>
+              )}
 
               {showTokenInput && (
                 <div style={{
@@ -1328,6 +1519,19 @@ export const App = ({ isStandalone = false }) => {
                         </h3>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {optimizationReport.source && (
+                          <span style={{
+                            backgroundColor: cardBg,
+                            border: `1px solid ${border}`,
+                            color: muted,
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            padding: '3px 8px',
+                            borderRadius: '12px'
+                          }}>
+                            {optimizationReport.source}
+                          </span>
+                        )}
                         <span style={{
                           backgroundColor: optimizationReport.status === 'PERFECT' ? '#dcfce7' : '#ffedd5',
                           color: optimizationReport.status === 'PERFECT' ? '#15803d' : '#c2410c',
