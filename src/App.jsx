@@ -756,55 +756,91 @@ export const App = ({ isStandalone = false }) => {
           marginTop: '12px',
           transition: 'all 0.2s ease'
         }}>
-          {/* Collapsible Header */}
+          {/* Top Bar: Always Visible Active Model Dropdown + Clear + Filter Toggle */}
           <div
-            onClick={() => setIsFiltersOpen(!isFiltersOpen)}
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              cursor: 'pointer',
-              userSelect: 'none',
+              flexWrap: 'wrap',
+              gap: '12px',
               paddingBottom: isFiltersOpen ? '12px' : '0',
               borderBottom: isFiltersOpen ? `1px solid ${border}` : 'none'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '13px', fontWeight: '700', color: text, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span>{isFiltersOpen ? '▾' : '▸'}</span> Model & Telemetry Filters
-              </span>
-              <span style={{
-                fontSize: '12px',
-                padding: '2px 8px',
-                borderRadius: '12px',
-                backgroundColor: isDarkMode ? '#334155' : '#e2e8f0',
-                color: text,
-                fontWeight: '500'
-              }}>
-                Active: <strong>{selectedAgentId === 'All' ? '🌐 All Models' : (editName || selectedAgentId)}</strong>
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', flex: 1 }}>
+              <label style={{ fontSize: '13px', fontWeight: '700', color: text, whiteSpace: 'nowrap' }}>
+                Active Model:
+              </label>
+
+              <select
+                value={selectedAgentId}
+                onChange={(e) => handleSelectAgent(e.target.value)}
+                disabled={loading}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  border: `1px solid ${border}`,
+                  backgroundColor: inputBg,
+                  color: text,
+                  fontSize: '13px',
+                  outline: 'none',
+                  fontWeight: '500',
+                  minWidth: '280px',
+                  cursor: 'pointer'
+                }}
+              >
+                <option value="All">🌐 All Models & Agents ({masterTelemetryRows.length || telemetryRows.length} total queries)</option>
+                {allAvailableAgents.filter(a => !filterExcludeDashboards || !a.isDashboard || a.id === selectedAgentId).map(a => {
+                  const badge = a.feedbackCount > 0 
+                    ? `[${a.feedbackCount} feedback${a.negativeCount > 0 ? ` • ${a.negativeCount} 👎` : ' • 👍'}]`
+                    : '[0 feedback]';
+                  const typeLabel = a.isStudioAgent ? 'Agent Studio' : (a.isDashboard ? 'Dashboard Session' : 'General');
+                  return (
+                    <option key={a.id} value={a.id}>
+                      {a.name} — {badge} ({typeLabel})
+                    </option>
+                  );
+                })}
+              </select>
+
+              {selectedAgentId !== 'All' && (
+                <button
+                  onClick={() => handleSelectAgent('All')}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: `1px solid ${border}`,
+                    color: primary,
+                    borderRadius: '8px',
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  ✕ Clear Selection
+                </button>
+              )}
             </div>
 
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsFiltersOpen(!isFiltersOpen);
-              }}
+              onClick={() => setIsFiltersOpen(!isFiltersOpen)}
               style={{
-                backgroundColor: 'transparent',
+                backgroundColor: isFiltersOpen ? (isDarkMode ? '#334155' : '#e2e8f0') : 'transparent',
                 border: `1px solid ${border}`,
-                borderRadius: '6px',
-                padding: '4px 10px',
+                borderRadius: '8px',
+                padding: '6px 12px',
                 fontSize: '12px',
-                color: muted,
+                color: text,
                 cursor: 'pointer',
-                fontWeight: '500',
+                fontWeight: '600',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px'
+                gap: '6px'
               }}
             >
-              {isFiltersOpen ? '▲ Collapse Filters' : '▼ Expand Filters'}
+              <span>{isFiltersOpen ? '▲ Hide Advanced Filters' : '▼ More Filters'}</span>
             </button>
           </div>
 
@@ -905,60 +941,6 @@ export const App = ({ isStandalone = false }) => {
             </div>
           </div>
 
-          {/* Searchable Combobox Select + Quick Select Row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: '13px', fontWeight: '600', color: text, whiteSpace: 'nowrap' }}>Active Model:</label>
-            <select
-              value={selectedAgentId}
-              onChange={(e) => handleSelectAgent(e.target.value)}
-              disabled={loading}
-              style={{
-                flex: 1,
-                minWidth: '280px',
-                padding: '9px 12px',
-                borderRadius: '8px',
-                border: `1px solid ${border}`,
-                backgroundColor: inputBg,
-                color: text,
-                fontSize: '13px',
-                outline: 'none',
-                fontWeight: '500'
-              }}
-            >
-              <option value="All">🌐 All Models & Agents ({masterTelemetryRows.length || telemetryRows.length} total queries)</option>
-              {filteredAgents.map(a => {
-                const badge = a.feedbackCount > 0 
-                  ? `[${a.feedbackCount} feedback${a.negativeCount > 0 ? ` • ${a.negativeCount} 👎` : ' • 👍'}]`
-                  : '[0 feedback]';
-                const typeLabel = a.isStudioAgent ? 'Agent Studio' : (a.isDashboard ? 'Dashboard Session' : 'General');
-                return (
-                  <option key={a.id} value={a.id}>
-                    {a.name} — {badge} ({typeLabel})
-                  </option>
-                );
-              })}
-            </select>
-
-            {selectedAgentId !== 'All' && (
-              <button
-                onClick={() => handleSelectAgent('All')}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: `1px solid ${border}`,
-                  color: primary,
-                  borderRadius: '8px',
-                  padding: '8px 14px',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                ✕ Clear Selection
-              </button>
-            )}
-          </div>
-
           {/* Quick-Select Feedback Pills Bar */}
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
@@ -1045,54 +1027,6 @@ export const App = ({ isStandalone = false }) => {
             </div>
           </div>
 
-          {/* Active Model Banner */}
-          {selectedAgentId !== 'All' && (
-            <div style={{
-              marginTop: '12px',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              backgroundColor: isDarkMode ? '#0f172a' : '#eff6ff',
-              border: `1px solid ${isDarkMode ? '#334155' : '#bfdbfe'}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '8px',
-              fontSize: '12px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '14px' }}>🎯</span>
-                <span>Active Filter: <strong style={{ color: text }}>{editName || selectedAgentId}</strong></span>
-                <span style={{
-                  fontSize: '11px',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  backgroundColor: currentAgent?.isDashboard ? '#fef3c7' : '#dbeafe',
-                  color: currentAgent?.isDashboard ? '#92400e' : '#1e40af',
-                  fontWeight: '600'
-                }}>
-                  {currentAgent?.isDashboard ? 'Dashboard Session' : 'Agent Studio Agent'}
-                </span>
-                <span style={{ color: muted }}>
-                  &bull; {telemetryRows.length} matching feedback queries
-                </span>
-              </div>
-              <button
-                onClick={() => handleSelectAgent('All')}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: 'none',
-                  color: primary,
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '12px',
-                  padding: 0
-                }}
-              >
-                ✕ View All Models
-              </button>
-            </div>
-          )}
             </div>
           )}
         </div>
