@@ -433,15 +433,6 @@ export const App = ({ isStandalone = false }) => {
     setIsOptimizing(true);
     setOptimizationError('');
 
-    let activeToken = gcpToken;
-    if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
-      activeToken = await handleGoogleSignIn();
-      if (!activeToken) {
-        setIsOptimizing(false);
-        return;
-      }
-    }
-
     try {
       const agentConfig = {
         id: selectedAgentId,
@@ -452,7 +443,8 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      const report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
+      // Calls Looker's Native Conversational Analytics Agent (No external tokens/proxies needed)
+      const report = await requestAgentOptimization(agentConfig, telemetryRows, gcpToken, extensionSDK, coreSDK);
       setOptimizationReport(report);
     } catch (err) {
       console.error('Optimization run error:', err);
