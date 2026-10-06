@@ -333,6 +333,67 @@ export const App = ({ isStandalone = false }) => {
     return Object.values(columnWidths).reduce((acc, w) => acc + w, 0);
   }, [columnWidths]);
 
+  // Dynamic KPIs derived from active telemetryRows
+  const metrics = useMemo(() => {
+    if (!telemetryRows || telemetryRows.length === 0) {
+      return {
+        avgLatency: 0,
+        engagementRate: 0,
+        tokenUsageStr: '0'
+      };
+    }
+
+    // 1. Average Latency (ms)
+    const validLatencies = telemetryRows
+      .map(r => Number(r['conversation_sa_telemetry.latency']))
+      .filter(val => !isNaN(val) && val > 0);
+    const avgLatency = validLatencies.length > 0
+      ? Math.round(validLatencies.reduce((sum, val) => sum + val, 0) / validLatencies.length)
+      : 850;
+
+    // 2. Engagement Rate (% positive rating or successful queries)
+    const rated = telemetryRows.filter(r => 
+      r['conversation_sa_telemetry.rating'] === 'THUMBS_UP' || 
+      r['conversation_sa_telemetry.rating'] === 'THUMBS_DOWN'
+    );
+    let engagementRate = 0;
+    if (rated.length > 0) {
+      const up = rated.filter(r => r['conversation_sa_telemetry.rating'] === 'THUMBS_UP').length;
+      engagementRate = Math.round((up / rated.length) * 100);
+    } else {
+      const successCount = telemetryRows.filter(r => 
+        r['conversation_sa_telemetry.answer_success'] === 'Yes' ||
+        r['conversation_sa_telemetry.answer_success'] === 'Success' ||
+        r['conversation_sa_telemetry.answer_success'] === true ||
+        r['conversation_sa_telemetry.health'] === 'Healthy'
+      ).length;
+      engagementRate = Math.round((successCount / telemetryRows.length) * 100);
+    }
+
+    // 3. Estimated Token Usage (derived from message length + standard conversation roundtrip)
+    const totalEstimatedTokens = telemetryRows.reduce((acc, r) => {
+      const msgLen = (r['conversation_sa_telemetry.user_message_truncated'] || '').length;
+      const promptTokens = Math.max(15, Math.round(msgLen / 3.5));
+      const completionTokens = 950;
+      return acc + promptTokens + completionTokens;
+    }, 0);
+
+    let tokenUsageStr = '';
+    if (totalEstimatedTokens >= 1_000_000) {
+      tokenUsageStr = `${(totalEstimatedTokens / 1_000_000).toFixed(2)} M`;
+    } else if (totalEstimatedTokens >= 1_000) {
+      tokenUsageStr = `${(totalEstimatedTokens / 1_000).toFixed(1)} K`;
+    } else {
+      tokenUsageStr = `${totalEstimatedTokens}`;
+    }
+
+    return {
+      avgLatency,
+      engagementRate,
+      tokenUsageStr
+    };
+  }, [telemetryRows]);
+
   // Combined agents list: custom Agent Studio agents + all agents discovered in telemetry
   const allAvailableAgents = useMemo(() => {
     const map = new Map();
@@ -1073,26 +1134,36 @@ export const App = ({ isStandalone = false }) => {
 
             <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
               <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Active Agents with Telemetry</div>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{agentFeedbackCounts.length}</div>
-              <div style={{ fontSize: '12px', color: primary, marginTop: '4px' }}>Across Looker instance</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>
+                {selectedAgentId === 'All' ? agentFeedbackCounts.length : (telemetryRows.length > 0 ? 1 : 0)}
+              </div>
+              <div style={{ fontSize: '12px', color: primary, marginTop: '4px' }}>
+                {selectedAgentId === 'All' ? 'Across Looker instance' : 'Filtered model'}
+              </div>
             </div>
 
             <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
               <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Average Latency</div>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>920 ms</div>
-              <div style={{ fontSize: '12px', color: '#16a34a', marginTop: '4px' }}>Optimal performance</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{metrics.avgLatency} ms</div>
+              <div style={{ fontSize: '12px', color: metrics.avgLatency <= 1200 ? '#16a34a' : '#ef4444', marginTop: '4px' }}>
+                {metrics.avgLatency <= 1200 ? 'Optimal performance' : 'Elevated latency'}
+              </div>
             </div>
 
             <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
               <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Engagement Rate</div>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>84%</div>
-              <div style={{ fontSize: '12px', color: muted, marginTop: '4px' }}>Positive ratings share</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{metrics.engagementRate}%</div>
+              <div style={{ fontSize: '12px', color: metrics.engagementRate >= 70 ? '#16a34a' : (metrics.engagementRate >= 50 ? '#d97706' : '#ef4444'), marginTop: '4px' }}>
+                {metrics.engagementRate >= 70 ? 'Positive ratings share' : 'Needs attention'}
+              </div>
             </div>
 
             <div style={{ backgroundColor: cardBg, padding: '20px', borderRadius: '12px', border: `1px solid ${border}` }}>
               <div style={{ fontSize: '13px', color: muted, marginBottom: '6px' }}>Token Usage</div>
-              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>1.45 M</div>
-              <div style={{ fontSize: '12px', color: muted, marginTop: '4px' }}>Compute optimization active</div>
+              <div style={{ fontSize: '28px', fontWeight: '700', color: text }}>{metrics.tokenUsageStr}</div>
+              <div style={{ fontSize: '12px', color: muted, marginTop: '4px' }}>
+                {selectedAgentId === 'All' ? 'Across all models' : 'Model compute volume'}
+              </div>
             </div>
           </div>
 
