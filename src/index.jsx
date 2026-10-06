@@ -48,7 +48,12 @@ const standaloneCoreSDK = {
   update_agent: async () => ({ ok: true }),
   create_conversation: async () => ({ id: 'standalone_conv' }),
   conversational_analytics_chat: async () => [{ role: 'agent', text: 'Standalone browser preview mode.' }],
-  run_inline_query: async () => []
+  run_inline_query: async () => [],
+  all_connections: async () => [
+    { name: 'default_bigquery_connection', dialect_name: 'bigquery_standard_sql' }
+  ],
+  create_sql_query: async () => ({ slug: 'standalone_mock_slug' }),
+  run_sql_query: async () => []
 }
 
 const StandaloneProvider = ({ children }) => {

@@ -33,15 +33,5 @@ application: agent_optimizer {
     local_storage: yes
     navigation: yes
     new_window: yes
-    scoped_user_attributes: [
-      "backend_token"
-    ]
-    oauth2_urls: [
-      "https://accounts.google.com/o/oauth2/v2/auth"
-    ]
-    external_api_urls: [
-      "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app",
-      "https://agent-optimizer-backend-82452831399.us-central1.run.app"
-    ]
   }
 }

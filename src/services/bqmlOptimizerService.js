@@ -12,6 +12,56 @@ export const DEFAULT_BQ_CONNECTION = 'default_bigquery_connection';
 export const DEFAULT_BQ_MODEL_ID = 'cloud-looker-devrel-demos.agent_optimizer_us.gemini_model';
 
 /**
+ * Provides a demonstration optimization report for sandbox / preview / local testing
+ * or when a BigQuery ML remote model is not yet configured.
+ */
+export function getMockOptimizationReport(agentConfig = {}) {
+  const agentName = agentConfig.name || agentConfig.id || 'Selected Agent';
+  const existingInstructions = agentConfig.instructions || '';
+
+  return {
+    status: 'NEEDS_OPTIMIZATION',
+    summary: `Automated assessment for ${agentName}: Telemetry reveals user friction from date range ambiguity, unhandled metric synonyms, and query response latency.`,
+    performanceScore: 78,
+    themes: [
+      {
+        label: 'Date Range Ambiguity',
+        type: 'negative',
+        details: 'Users asked for relative date ranges ("last quarter", "Q3 vs Q2") which failed to map to specific dimension fields.'
+      },
+      {
+        label: 'Analytical Latency Spikes',
+        type: 'warning',
+        details: 'Multi-dimension cross-filtering queries on non-indexed raw tables resulted in latency above 2,200ms.'
+      },
+      {
+        label: 'Concise Formatting',
+        type: 'positive',
+        details: 'User ratings were highest when responses led with bulleted executive takeaways.'
+      }
+    ],
+    rootCauseAnalysis: `The system prompt instructions for "${agentName}" lack explicit mappings for relative timeframes and do not constrain unbounded analytical queries to pre-aggregated explore summary measures.`,
+    recommendations: {
+      instructionImprovements: 'Define explicit date dimensions (e.g., default to order_items.created_date), establish standard metric definitions, and instruct the agent to deliver concise executive summaries.',
+      suggestedFullInstructions: `${existingInstructions ? existingInstructions + '\n\n' : ''}### Optimization Rules & Guidelines:
+- **Relative Date Handling**: When users ask for "last month", "last quarter", or relative timeframes, default to order_items.created_date.
+- **Executive Summaries**: Provide 2-3 high-level bulleted findings before displaying detailed data breakdowns.
+- **Performance Optimization**: For high-volume aggregations, prefer pre-computed summary measures over raw row counts.
+- **Out of Scope Handling**: Politely clarify when requested metrics are outside the linked explores.`,
+      sourcesRecommendations: 'Ensure linked LookML explores include pre-aggregated persistent derived tables (PDTs) and explicit dimension descriptions.',
+      codeInterpreterRecommendation: 'Keep Code Interpreter enabled to support dynamic calculations and trend analyses.'
+    },
+    actionPlan: [
+      'Apply suggested prompt instructions with date dimension mappings and executive summary formatting.',
+      'Save configuration directly to Looker and verify behavior in the Live Preview sandbox.',
+      'Benchmark agent with golden test queries to measure accuracy improvement.'
+    ],
+    source: 'Demonstration / Preview Mode (BigQuery ML Remote Model)',
+    modelUsed: 'BigQuery ML (Gemini 2.5 Flash)'
+  };
+}
+
+/**
  * Escapes characters for BigQuery SQL string literals.
  * Handles single quotes, backslashes, and line breaks.
  */

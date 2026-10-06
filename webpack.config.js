@@ -1,7 +1,5 @@
 const path = require('path')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
-const express = require('express')
-const { callGeminiOptimizer } = require('./src/services/vertexOptimizer')
 
 module.exports = (env, argv) => {
   const isProduction = argv.mode === 'production'
@@ -72,26 +70,6 @@ module.exports = (env, argv) => {
         'Access-Control-Allow-Headers': 'X-Requested-With, content-type, Authorization'
       },
       historyApiFallback: true,
-      setupMiddlewares: (middlewares, devServer) => {
-        if (!devServer) {
-          throw new Error('webpack-dev-server is not defined')
-        }
-
-        devServer.app.use(express.json({ limit: '10mb' }))
-
-        devServer.app.post('/api/optimize-agent', async (req, res) => {
-          try {
-            const { agent, telemetry } = req.body || {}
-            const result = await callGeminiOptimizer(agent || {}, telemetry || [])
-            res.json(result)
-          } catch (err) {
-            console.error('Optimizer API error:', err)
-            res.status(500).json({ error: err.message || 'Failed to run optimization' })
-          }
-        })
-
-        return middlewares
-      },
       client: {
         webSocketURL: 'ws://localhost:8080/ws'
       }

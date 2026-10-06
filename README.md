@@ -1,118 +1,141 @@
-# Agent Optimizer - Looker Extension Framework
+# Looker Agent Optimizer Extension
 
-This application is a full **Looker Extension Framework** application built from the `agent-optimizer` data app. Unlike sandboxed dashboard tile data apps, this extension has full **Looker Core 4.0 API entitlements** to directly interact with, modify, and optimize real Looker AI agents in real time.
+A **Looker Extension Framework** application designed for AI Agent Owners and Analysts to continuously monitor, evaluate, and autonomously optimize Looker AI Agents.
 
----
-
-## Key Features
-
-1. **Live Agent Management via Looker API**:
-   - Fetches real agents dynamically (`search_agents` / `GET /api/4.0/agents/search`).
-   - Edits agent configuration: Name, Description, Code Interpreter toggle, and Linked Explores (`sources`).
-   - Edits Agent Instructions (prompt engineering).
-   - **Direct Updates**: Saves edits directly into Looker using `update_agent` (`PATCH /api/4.0/agents/{agent_id}`).
-
-2. **Live Agent Testing & Preview Chat**:
-   - Initiates real agent conversations via `create_conversation` (`POST /api/4.0/conversations`).
-   - Dispatches user prompts and streams responses using `conversational_analytics_chat` (`POST /api/4.0/conversational_analytics/chat`).
-   - Allows instant verification of how instruction updates affect agent outputs.
-
-3. **Telemetry & Feedback Analytics**:
-   - Queries `system__activity.conversations_feedback` via `run_inline_query`.
-   - Tracks KPIs: Total Conversations, Average Latency, User Feedback Ratings, and Token Usage.
-   - Interactive grid showing real message logs, latency, and health badges.
-
-4. **Autonomous Vertex AI Instruction Optimizer**:
-   - Hosted on GCP project: `cloud-looker-devrel-demos` (location: `us-central1`).
-   - Powered by **Gemini 2.5 Flash** (configurable via `GEMINI_MODEL`).
-   - Autonomously analyzes telemetry and negative user ratings against agent prompt instructions.
-   - Generates performance scores, feedback themes, root cause analysis, and one-click applicable prompt rewrites.
-
-5. **Actions & Monitoring Hub**:
-   - Monitors integration states and Looker Actions (Slack alerts, ActionHub pipelines).
-   - Analysis hub for unstructured user sentiment and latency spike trends.
+The extension leverages **100% in-database BigQuery ML (`ML.GENERATE_TEXT`)** via Looker Core API methods (`create_sql_query` & `run_sql_query`) following the Looker Explore Assistant architectural pattern. **Zero external proxy servers, zero Docker containers, and zero third-party webhooks are required.**
 
 ---
 
-## Looker CLI (`looker-cli`)
+## 🚀 Key Capabilities
 
-As part of this setup, the official Go-based **Looker CLI** (`looker-cli` v0.4.8) has been compiled from [`looker-open-source/looker-cli`](https://github.com/looker-open-source/looker-cli) and installed in your user PATH at:
-`/usr/local/google/home/chrissiea/.local/bin/looker-cli`
+1. **Telemetry & Feedback Triage (Tab 1)**:
+   - Queries `system__activity.conversations_feedback` in real time.
+   - Dynamic KPIs: Engagement Rate, Negative Feedback %, Median Latency, and Token Consumption.
+   - Filterable, paginated log grid displaying user prompts, agent answers, and ratings (👍 / 👎).
 
-A `default` profile has been configured using your local credentials from `data-apps-config.json`.
+2. **Autonomous BQML Recommendation Agent (Tab 2)**:
+   - Diagnoses prompt gaps, date ambiguities, unmapped terminology, and explore limitations.
+   - Synthesizes actionable recommendations, root-cause analyses, and full prompt rewrites.
+   - Includes one-click **"Apply to Agent"** to test and deploy improvements.
 
-### CLI Recipes
+3. **Live Prompt Engineering & Chat Sandbox (Tab 3)**:
+   - Edit agent name, description, system instructions, and linked explores.
+   - Interactive preview chat powered by Looker's `conversational_analytics_chat` Core API.
+   - One-click **"Save to Looker"** commits changes directly via `PATCH /api/4.0/agents/{id}`.
 
-#### 1. Search Real Agents
-```bash
-looker-cli api conversationalanalytics search_agents --limit 5
-```
+4. **Action Hub & Alerting (Tab 4)**:
+   - Dispatch feedback summaries and optimization plans to Slack channels, Email, or Webhooks.
+   - Configure threshold-based negative feedback alerts.
 
-#### 2. Get Details of a Specific Agent
-```bash
-looker-cli api conversationalanalytics get_agent <AGENT_ID>
-```
+5. **Benchmark Evals (Tab 5)**:
+   - Benchmark agent response accuracy and hallucination rates against golden queries.
 
-#### 3. Update an Agent from the CLI
-Generate the JSON payload template:
-```bash
-looker-cli api conversationalanalytics update_agent --template
-```
-Submit the update directly:
-```bash
-cat << 'JSON' | looker-cli api conversationalanalytics update_agent <AGENT_ID> -
-{
-  "name": "Updated Agent Name",
-  "description": "Updated agent description",
-  "context": {
-    "instructions": "Be concise, answer with bulleted executive summaries."
-  }
-}
-JSON
-```
-
-#### 4. Query Telemetry with `run_inline_query`
-```bash
-echo '{"model":"system__activity","view":"conversations_feedback","fields":["agent.name","conversation.count"],"limit":"5"}' | looker-cli api query run_inline_query json -
-```
+6. **Enterprise Architecture & Governance (Tab 6)**:
+   - Comprehensive living spec covering IAM permissions, Looker database connections, and API contract references.
 
 ---
 
-## Extension Structure
+## 🏗️ Architecture
 
 ```
-agent-optimizer-extension/
-├── manifest.lkml             # LookML application definition with API entitlements
-├── package.json              # Extension dependencies & scripts
-├── webpack.config.js         # Webpack bundle & HMR dev server configuration
-├── src/
-│   ├── index.jsx             # DOM entry point wrapping <ExtensionProvider40>
-│   ├── App.jsx               # Main React application with 3 tabs & dark mode
-│   └── services/
-│       └── agentService.js   # Looker 4.0 API service (agents, chat, telemetry)
-└── dist/
-    └── bundle.js             # Production bundled JavaScript
+┌────────────────────────────────────────────────────────┐
+│               Looker Extension Framework               │
+│  (React 17 + Looker Components + Extension SDK 4.0)    │
+└───────────────────────────┬────────────────────────────┘
+                            │ Core SDK (create_sql_query / run_sql_query)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│               Looker Core 4.0 API                      │
+│      (Executes queries over native connection)         │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│            Google BigQuery ML (BQML)                   │
+│   SELECT ml_generate_text_llm_result FROM              │
+│   ML.GENERATE_TEXT(MODEL `your_project.dataset.model`) │
+└────────────────────────────────────────────────────────┘
 ```
+
+- **In-Database Inference**: All LLM prompt evaluations run inside BigQuery via remote models connected to Vertex AI.
+- **Enterprise Security**: Adheres to native Looker RBAC and BigQuery dataset IAM. No tokens or credentials leave your Google Cloud boundary.
 
 ---
 
-## Local Development & Deployment
+## 📦 Quick Start & Installation
 
-### 1. Start Local Development Server
+### Option 1: Direct Git Integration (Recommended)
+
+1. In your Looker instance, navigate to **Develop > Projects** and create a new project (e.g., `agent_optimizer`).
+2. Configure Git with this repository URL.
+3. The repository already includes `manifest.lkml`, `agent_optimizer.model.lkml`, and the compiled `bundle.js`.
+4. Deploy the project to production. The extension will immediately appear in your Looker **Applications** menu.
+
+### Option 2: Local Development
+
+To develop or test locally:
+
 ```bash
-cd agent-optimizer-extension
+# 1. Install dependencies
+yarn install
+
+# 2. Start local development server with Hot Module Reloading (HMR)
 yarn develop
 ```
-This runs the development server at `http://localhost:8080/bundle.js` with hot module reloading.
 
-### 2. Configure LookML Manifest
-Copy the contents of `manifest.lkml` into your LookML project manifest in Looker:
+Then in your LookML `manifest.lkml`, temporarily switch the entrypoint:
+
+```lookml
+application: agent_optimizer {
+  label: "Agent Feedback Optimizer"
+  url: "http://localhost:8080/bundle.js"
+  # file: "bundle.js"
+  entitlements: { ... }
+}
+```
+
+### Option 3: Compiling Production Bundle
+
+Whenever you make changes to `src/`:
+
+```bash
+yarn build
+```
+
+This compiles the React application into `dist/bundle.js` and automatically copies it to the root `bundle.js` for Looker LookML Git deployment.
+
+---
+
+## ⚙️ BigQuery ML Remote Model Setup
+
+To enable the autonomous optimization engine on your BigQuery connection, create a Vertex AI remote model in BigQuery using standard SQL:
+
+```sql
+-- 1. Create Cloud Resource connection in BigQuery (or use an existing connection)
+-- Console: BigQuery > + ADD > External data source > Vertex AI remote models
+
+-- 2. Create the remote model in your dataset
+CREATE OR REPLACE MODEL `your_gcp_project.your_dataset.gemini_model`
+REMOTE WITH CONNECTION `us.your_connection_id`
+OPTIONS (ENDPOINT = 'gemini-2.5-flash');
+```
+
+In the extension's **Recommendation Agent** tab, click **⚙️ Connection Settings** to select your Looker BigQuery connection and input your model identifier (`your_gcp_project.your_dataset.gemini_model`).
+
+> **Note**: If your BigQuery remote model is still being provisioned, the extension provides a built-in **"Preview Sample Report"** fallback so you can explore all recommendation and prompt diff features immediately.
+
+---
+
+## 📋 LookML Manifest Entitlements
+
+The `manifest.lkml` includes all required Looker Core API methods:
+
 ```lookml
 project_name: "agent_optimizer"
 
 application: agent_optimizer {
   label: "Agent Feedback Optimizer"
-  url: "http://localhost:8080/bundle.js"
+  file: "bundle.js"
   entitlements: {
     core_api_methods: [
       "me",
@@ -130,23 +153,38 @@ application: agent_optimizer {
       "create_golden_query",
       "update_golden_query",
       "delete_golden_query",
-      "all_conversation_messages"
+      "all_conversation_messages",
+      "create_sql_query",
+      "run_sql_query",
+      "all_connections"
     ]
     use_embeds: yes
     use_form_submit: yes
     use_clipboard: yes
+    local_storage: yes
     navigation: yes
     new_window: yes
   }
 }
 ```
 
-### 3. Build Production Bundle
-To deploy as a hosted file in Looker:
-```bash
-yarn build
+---
+
+## 📂 Repository Structure
+
 ```
-Upload `dist/bundle.js` to your LookML project and update `manifest.lkml` to reference:
-```lookml
-file: "bundle.js"
+looker-agent-optimizer-extension/
+├── manifest.lkml                 # Looker Extension application declaration & entitlements
+├── agent_optimizer.model.lkml    # Minimal LookML model for database connection routing
+├── package.json                  # Dependencies and build scripts
+├── webpack.config.js             # Webpack 5 bundling and dev server config
+├── bundle.js                     # Root production bundle for LookML Git deployment
+├── dist/                         # Webpack distribution output
+└── src/
+    ├── index.jsx                 # Application entrypoint & ExtensionProvider40 wrapper
+    ├── App.jsx                   # Main application with 6 tabs & dark mode
+    └── services/
+        ├── agentService.js       # Looker Core API service (agents, chat, telemetry)
+        └── bqmlOptimizerService.js # In-database BigQuery ML inference service
 ```
+

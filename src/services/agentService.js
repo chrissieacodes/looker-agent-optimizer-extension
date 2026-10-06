@@ -272,108 +272,26 @@ export async function runTelemetryQuery(coreSDK, agentId = null, limit = 500) {
   }
 }
 
-export async function requestAgentOptimization(agentConfig, telemetryRows, userAuthToken = null, extensionSDK = null) {
-  if (!extensionSDK) {
-    throw new Error("Looker Extension SDK is not available.");
+export async function requestAgentOptimization(params = {}) {
+  const { coreSDK, agentConfig, telemetryRows, connectionName, modelId } = params;
+  if (!coreSDK) {
+    return getMockOptimizationReport(agentConfig);
   }
-
-  const token = userAuthToken ? userAuthToken.trim() : "";
-  const secretTag = typeof extensionSDK.createSecretKeyTag === "function"
-    ? extensionSDK.createSecretKeyTag("backend_token")
-    : null;
-
-  const payload = {
-    agent: agentConfig,
-    telemetry: telemetryRows
-  };
-
-  const endpoints = [
-    "https://agent-optimizer-backend-82452831399.us-central1.run.app/api/optimize-agent",
-    "https://agent-optimizer-backend-ofamr32cra-uc.a.run.app/api/optimize-agent"
-  ];
-
-  let lastError = null;
-
-  // // 1. Google Recommendation: serverProxy (eliminates CORS preflight overhead server-to-server)
-  if (typeof extensionSDK.serverProxy === "function") {
-    for (const url of endpoints) {
-      try {
-        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.serverProxy: ${url}...`);
-        const serverHeaders = {
-          "Content-Type": "application/json"
-        };
-        if (token) {
-          serverHeaders["Authorization"] = `Bearer ${token}`;
-        } else if (secretTag) {
-          serverHeaders["Authorization"] = `Bearer ${secretTag}`;
-        }
-
-        const response = await extensionSDK.serverProxy(url, {
-          method: "POST",
-          headers: serverHeaders,
-          body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok && response.body) {
-          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via serverProxy)";
-          return data;
-        }
-
-        if (response && !response.ok) {
-          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-          console.warn(`[AgentOptimizer] serverProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-          lastError = new Error(`serverProxy returned HTTP ${response.status}: ${errDetail}`);
-        }
-      } catch (err) {
-        console.warn(`[AgentOptimizer] serverProxy to ${url} failed:`, err);
-        lastError = err;
-      }
-    }
-  }
-
-  // 2. Fallback: fetchProxy (Looker UI proxy)
-  if (typeof extensionSDK.fetchProxy === "function") {
-    for (const url of endpoints) {
-      try {
-        console.info(`[AgentOptimizer] Calling Cloud Run via extensionSDK.fetchProxy: ${url}...`);
-        const fetchHeaders = {
-          "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
-        };
-
-        const response = await extensionSDK.fetchProxy(url, {
-          method: "POST",
-          headers: fetchHeaders,
-          body: JSON.stringify(payload)
-        });
-
-        if (response && response.ok && response.body) {
-          const data = typeof response.body === "string" ? JSON.parse(response.body) : response.body;
-          data.source = "Vertex AI (Gemini 2.5 Flash on Cloud Run via fetchProxy)";
-          return data;
-        }
-
-        if (response && !response.ok) {
-          const errDetail = typeof response.body === "string" ? response.body : JSON.stringify(response.body || response.statusText || "");
-          console.warn(`[AgentOptimizer] fetchProxy to ${url} returned HTTP ${response.status}: ${errDetail}`);
-          lastError = new Error(`fetchProxy returned HTTP ${response.status}: ${errDetail}`);
-        }
-      } catch (err) {
-        console.warn(`[AgentOptimizer] fetchProxy to ${url} failed:`, err);
-        lastError = err;
-      }
-    }
-  }
-
-  throw lastError || new Error("Failed to reach Cloud Run Vertex AI Optimizer backend.");
+  return requestBqmlAgentOptimization({
+    coreSDK,
+    agentConfig,
+    telemetryRows,
+    connectionName,
+    modelId
+  });
 }
 
-export const optimizeAgent = requestAgentOptimization;
+export const optimizeAgent = requestBqmlAgentOptimization;
 
 // BigQuery ML (BQML) Architectural Pattern exports (Explore Assistant pattern)
 export {
   requestBqmlAgentOptimization,
+  getMockOptimizationReport,
   generateBqmlSQL,
   buildAgentOptimizerPrompt,
   getBigQueryConnections,

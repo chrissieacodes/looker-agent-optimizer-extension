@@ -9,6 +9,7 @@ import {
   runTelemetryQuery,
   requestAgentOptimization,
   requestBqmlAgentOptimization,
+  getMockOptimizationReport,
   getBigQueryConnections,
   DEFAULT_BQ_CONNECTION,
   DEFAULT_BQ_MODEL_ID
@@ -52,14 +53,9 @@ export const App = ({ isStandalone = false }) => {
   const [optimizationReport, setOptimizationReport] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationError, setOptimizationError] = useState('');
-  const [gcpToken, setGcpToken] = useState('');
-  const [showTokenInput, setShowTokenInput] = useState(false);
-  const [tokenSavedMsg, setTokenSavedMsg] = useState('');
-  const [googleClientId, setGoogleClientId] = useState("82452831399-dijmme0rntvi0d8ro8g24rl9fnbjrq0d.apps.googleusercontent.com");
-  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   
   // BQML Architecture Settings (Explore Assistant pattern)
-  const [optimizerBackend, setOptimizerBackend] = useState('bqml'); // 'bqml' | 'cloud_run'
   const [bqConnection, setBqConnection] = useState(DEFAULT_BQ_CONNECTION);
   const [bqModelId, setBqModelId] = useState(DEFAULT_BQ_MODEL_ID);
   const [availableBqConnections, setAvailableBqConnections] = useState([]);
@@ -88,68 +84,6 @@ export const App = ({ isStandalone = false }) => {
     }, 500);
   };
 
-  const handleGoogleSignIn = async () => {
-    setIsSigningIn(true);
-    setTokenSavedMsg("");
-    try {
-      if (!extensionSDK || typeof extensionSDK.oauth2Authenticate !== "function") {
-        throw new Error("Looker Extension SDK oauth2Authenticate is not available.");
-      }
-
-      const nonce = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      const authResponse = await extensionSDK.oauth2Authenticate(
-        "https://accounts.google.com/o/oauth2/v2/auth",
-        {
-          client_id: googleClientId.trim(),
-          scope: "openid email profile",
-          response_type: "id_token",
-          nonce: nonce
-        }
-      );
-
-      const token = authResponse?.access_token || authResponse?.id_token;
-      if (token) {
-        setGcpToken(token);
-        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
-          await extensionSDK.localStorageSetItem("gcp_auth_token", token).catch(() => {});
-        }
-        if (extensionSDK && typeof extensionSDK.userAttributeSetItem === "function") {
-          await extensionSDK.userAttributeSetItem("backend_token", token).catch(() => {});
-        }
-        setTokenSavedMsg("✓ Successfully authenticated with Google!");
-        setTimeout(() => setTokenSavedMsg(""), 4000);
-        return token;
-      } else {
-        throw new Error("No token returned from Google authentication popup.");
-      }
-    } catch (err) {
-      console.error("Google OAuth sign-in error:", err);
-      setTokenSavedMsg(`Google Sign-In: ${err.message || err}`);
-      return null;
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
-
-  // Load saved GCP token via Extension SDK storage & Looker user attributes
-  useEffect(() => {
-    if (extensionSDK) {
-      if (typeof extensionSDK.userAttributeGetItem === "function") {
-        extensionSDK.userAttributeGetItem("backend_token")
-          .then((val) => {
-            if (val) setGcpToken(val);
-          })
-          .catch(() => {});
-      }
-      if (typeof extensionSDK.localStorageGetItem === "function") {
-        extensionSDK.localStorageGetItem("gcp_auth_token")
-          .then((val) => {
-            if (val) setGcpToken(prev => prev || val);
-          })
-          .catch(() => {});
-      }
-    }
-  }, [extensionSDK]);
   
   // Discover available BigQuery connections in Looker for BQML optimization
   useEffect(() => {
@@ -728,49 +662,44 @@ export const App = ({ isStandalone = false }) => {
   };
 
   // Run autonomous AI optimization agent (BQML or Cloud Run)
-  const handleRunOptimization = async () => {
+  // Run autonomous AI optimization agent via BigQuery ML (Explore Assistant Pattern)
+  const handleRunOptimization = async (useDemoFallback = false) => {
     if (!selectedAgentId || selectedAgentId === 'All') return;
 
     setIsOptimizing(true);
     setOptimizationError('');
 
-    try {
-      const agentConfig = {
-        id: selectedAgentId,
-        name: editName || currentAgent?.name || selectedAgentId,
-        description: editDescription || currentAgent?.description || '',
-        instructions: editInstructions || currentAgent?.context?.instructions || '',
-        sources: editSources || currentAgent?.sources || [],
-        code_interpreter: codeInterpreter
-      };
+    const agentConfig = {
+      id: selectedAgentId,
+      name: editName || currentAgent?.name || selectedAgentId,
+      description: editDescription || currentAgent?.description || '',
+      instructions: editInstructions || currentAgent?.context?.instructions || '',
+      sources: editSources || currentAgent?.sources || [],
+      code_interpreter: codeInterpreter
+    };
 
-      let report;
-      if (optimizerBackend === 'bqml') {
-        // Execute via BigQuery ML (Explore Assistant Pattern - native Looker Core API, no external servers/IAP required)
-        report = await requestBqmlAgentOptimization({
-          coreSDK,
-          agentConfig,
-          telemetryRows,
-          connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
-          modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
-        });
-      } else {
-        // Execute via Cloud Run backend
-        let activeToken = gcpToken;
-        if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
-          activeToken = await handleGoogleSignIn();
-          if (!activeToken) {
-            setIsOptimizing(false);
-            return;
-          }
-        }
-        report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
-      }
+    if (useDemoFallback) {
+      setTimeout(() => {
+        setOptimizationReport(getMockOptimizationReport(agentConfig));
+        setIsOptimizing(false);
+      }, 400);
+      return;
+    }
+
+    try {
+      // Execute via BigQuery ML (Explore Assistant Pattern - native Looker Core API)
+      const report = await requestBqmlAgentOptimization({
+        coreSDK,
+        agentConfig,
+        telemetryRows,
+        connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
+        modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
+      });
 
       setOptimizationReport(report);
     } catch (err) {
       console.error('Optimization run error:', err);
-      setOptimizationError(err.message || 'Failed to complete AI optimization analysis.');
+      setOptimizationError(err.message || 'Failed to complete AI optimization analysis via BigQuery ML.');
     } finally {
       setIsOptimizing(false);
     }
@@ -1992,7 +1921,7 @@ export const App = ({ isStandalone = false }) => {
                     }}>
                       {optimizationReport?.modelUsed 
                         ? `Model: ${optimizationReport.modelUsed}` 
-                        : (optimizerBackend === 'bqml' ? 'BigQuery ML (Gemini 3.8 Flash)' : 'Cloud Run (Gemini 2.5 Flash)')}
+                        : 'BigQuery ML (Gemini)'}
                     </span>
                   </div>
                   <p style={{ margin: 0, fontSize: '14px', color: muted, maxWidth: '650px' }}>
@@ -2002,7 +1931,7 @@ export const App = ({ isStandalone = false }) => {
 
                 <div>
                   <button
-                    onClick={handleRunOptimization}
+                    onClick={() => handleRunOptimization(false)}
                     disabled={isOptimizing}
                     style={{
                       backgroundColor: isOptimizing ? '#94a3b8' : primary,
@@ -2058,7 +1987,7 @@ export const App = ({ isStandalone = false }) => {
                   </span>
                 </div>
                 <button
-                  onClick={() => setShowTokenInput(!showTokenInput)}
+                  onClick={() => setShowSettings(!showSettings)}
                   style={{
                     background: 'none',
                     border: `1px solid ${border}`,
@@ -2069,11 +1998,11 @@ export const App = ({ isStandalone = false }) => {
                     color: text
                   }}
                 >
-                  {showTokenInput ? 'Hide Settings' : '⚙️ Connection Settings'}
+                  {showSettings ? 'Hide Settings' : '⚙️ Connection Settings'}
                 </button>
               </div>
 
-              {showTokenInput && (
+              {showSettings && (
                 <div style={{
                   backgroundColor: cardBg,
                   borderRadius: '8px',
@@ -2145,10 +2074,44 @@ export const App = ({ isStandalone = false }) => {
                 </div>
               )}
 
-              {/* Error Message */}
+              {/* Error Message with Demo Preview Fallback */}
               {optimizationError && (
-                <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: '8px', padding: '16px', marginBottom: '20px', fontSize: '14px' }}>
-                  <strong>Error running optimization:</strong> {optimizationError}
+                <div style={{
+                  backgroundColor: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#991b1b',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  marginBottom: '20px',
+                  fontSize: '14px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '16px',
+                  flexWrap: 'wrap'
+                }}>
+                  <div>
+                    <strong>BigQuery ML Execution Notice:</strong> {optimizationError}
+                    <div style={{ fontSize: '12px', marginTop: '4px', color: '#b91c1c' }}>
+                      Verify your connection in Settings (⚙️), or preview sample recommendations below.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRunOptimization(true)}
+                    style={{
+                      backgroundColor: '#dc2626',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '8px 16px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    Preview Sample Report
+                  </button>
                 </div>
               )}
 
