@@ -7,6 +7,7 @@ import {
   createConversation,
   sendChatMessage,
   runTelemetryQuery,
+  requestAgentOptimization,
   requestBqmlAgentOptimization,
   getBigQueryConnections,
   DEFAULT_BQ_CONNECTION,
@@ -47,15 +48,84 @@ export const App = ({ isStandalone = false }) => {
   const [saveStatus, setSaveStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // AI Optimizer Agent State (Native BigQuery ML Architecture)
+  // AI Optimizer Agent State
   const [optimizationReport, setOptimizationReport] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationError, setOptimizationError] = useState('');
+  const [gcpToken, setGcpToken] = useState('');
+  const [showTokenInput, setShowTokenInput] = useState(false);
+  const [tokenSavedMsg, setTokenSavedMsg] = useState('');
+  const [googleClientId, setGoogleClientId] = useState("82452831399-dijmme0rntvi0d8ro8g24rl9fnbjrq0d.apps.googleusercontent.com");
+  const [isSigningIn, setIsSigningIn] = useState(false);
   
   // BQML Architecture Settings (Explore Assistant pattern)
+  const [optimizerBackend, setOptimizerBackend] = useState('bqml'); // 'bqml' | 'cloud_run'
   const [bqConnection, setBqConnection] = useState(DEFAULT_BQ_CONNECTION);
   const [bqModelId, setBqModelId] = useState(DEFAULT_BQ_MODEL_ID);
   const [availableBqConnections, setAvailableBqConnections] = useState([]);
+
+  const handleGoogleSignIn = async () => {
+    setIsSigningIn(true);
+    setTokenSavedMsg("");
+    try {
+      if (!extensionSDK || typeof extensionSDK.oauth2Authenticate !== "function") {
+        throw new Error("Looker Extension SDK oauth2Authenticate is not available.");
+      }
+
+      const nonce = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      const authResponse = await extensionSDK.oauth2Authenticate(
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        {
+          client_id: googleClientId.trim(),
+          scope: "openid email profile",
+          response_type: "id_token",
+          nonce: nonce
+        }
+      );
+
+      const token = authResponse?.access_token || authResponse?.id_token;
+      if (token) {
+        setGcpToken(token);
+        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
+          await extensionSDK.localStorageSetItem("gcp_auth_token", token).catch(() => {});
+        }
+        if (extensionSDK && typeof extensionSDK.userAttributeSetItem === "function") {
+          await extensionSDK.userAttributeSetItem("backend_token", token).catch(() => {});
+        }
+        setTokenSavedMsg("✓ Successfully authenticated with Google!");
+        setTimeout(() => setTokenSavedMsg(""), 4000);
+        return token;
+      } else {
+        throw new Error("No token returned from Google authentication popup.");
+      }
+    } catch (err) {
+      console.error("Google OAuth sign-in error:", err);
+      setTokenSavedMsg(`Google Sign-In: ${err.message || err}`);
+      return null;
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  // Load saved GCP token via Extension SDK storage & Looker user attributes
+  useEffect(() => {
+    if (extensionSDK) {
+      if (typeof extensionSDK.userAttributeGetItem === "function") {
+        extensionSDK.userAttributeGetItem("backend_token")
+          .then((val) => {
+            if (val) setGcpToken(val);
+          })
+          .catch(() => {});
+      }
+      if (typeof extensionSDK.localStorageGetItem === "function") {
+        extensionSDK.localStorageGetItem("gcp_auth_token")
+          .then((val) => {
+            if (val) setGcpToken(prev => prev || val);
+          })
+          .catch(() => {});
+      }
+    }
+  }, [extensionSDK]);
   
   // Discover available BigQuery connections in Looker for BQML optimization
   useEffect(() => {
@@ -90,6 +160,10 @@ export const App = ({ isStandalone = false }) => {
   const [tablePageSize, setTablePageSize] = useState(25);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [filterExcludeDashboards, setFilterExcludeDashboards] = useState(true);
+
+  // Model Selector Filter & Search State
+  const [agentSearchQuery, setAgentSearchQuery] = useState('');
+  const [agentFilterTab, setAgentFilterTab] = useState('with_feedback'); // 'with_feedback', 'needs_attention', 'custom_studio', 'all'
 
   // Table Sorting & Column Widths
   const [sortConfig, setSortConfig] = useState({ key: 'timestamp', direction: 'desc' });
@@ -361,6 +435,28 @@ export const App = ({ isStandalone = false }) => {
     return allAvailableAgents.filter(a => a.feedbackCount > 0 && (!filterExcludeDashboards || !a.isDashboard));
   }, [allAvailableAgents, filterExcludeDashboards]);
 
+  const filteredAgents = useMemo(() => {
+    return allAvailableAgents.filter(a => {
+      if (filterExcludeDashboards && a.isDashboard && a.id !== selectedAgentId) {
+        return false;
+      }
+      if (agentFilterTab === 'with_feedback' && a.feedbackCount === 0) {
+        return false;
+      }
+      if (agentFilterTab === 'needs_attention' && a.negativeCount === 0) {
+        return false;
+      }
+      if (agentFilterTab === 'custom_studio' && !a.isStudioAgent) {
+        return false;
+      }
+      if (agentSearchQuery.trim()) {
+        const q = agentSearchQuery.toLowerCase();
+        return a.name.toLowerCase().includes(q) || String(a.id).toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [allAvailableAgents, filterExcludeDashboards, agentFilterTab, agentSearchQuery, selectedAgentId]);
+
   const agentFeedbackCounts = useMemo(() => {
     return agentsWithFeedback;
   }, [agentsWithFeedback]);
@@ -562,14 +658,28 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      // Execute natively via BigQuery ML Remote Model (Explore Assistant Pattern)
-      const report = await requestBqmlAgentOptimization({
-        coreSDK,
-        agentConfig,
-        telemetryRows,
-        connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
-        modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
-      });
+      let report;
+      if (optimizerBackend === 'bqml') {
+        // Execute via BigQuery ML (Explore Assistant Pattern - native Looker Core API, no external servers/IAP required)
+        report = await requestBqmlAgentOptimization({
+          coreSDK,
+          agentConfig,
+          telemetryRows,
+          connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
+          modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
+        });
+      } else {
+        // Execute via Cloud Run backend
+        let activeToken = gcpToken;
+        if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
+          activeToken = await handleGoogleSignIn();
+          if (!activeToken) {
+            setIsOptimizing(false);
+            return;
+          }
+        }
+        report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
+      }
 
       setOptimizationReport(report);
     } catch (err) {
@@ -609,48 +719,328 @@ export const App = ({ isStandalone = false }) => {
       )}
 
       {/* Header Container */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>⚡</span> Agent Feedback Optimizer
-          </h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: muted }}>
-            Looker Extension Framework • Real-time Looker API & Native BigQuery ML Optimization
-          </p>
+      <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '20px', marginBottom: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '700', color: text }}>Agent Feedback Optimizer</h1>
+            <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: muted }}>
+              Looker Extension Framework • Real-time Looker API & Agent Optimization
+            </p>
+          </div>
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${border}`,
+              color: text,
+              padding: '8px 16px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+          </button>
         </div>
-        <button
-          onClick={() => setIsDarkMode(!isDarkMode)}
-          style={{
-            background: cardBg,
-            border: `1px solid ${border}`,
-            color: text,
-            padding: '7px 14px',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontWeight: '500',
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-          }}
-        >
-          {isDarkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
-        </button>
+
+        {/* Revamped Agent Selector & Filter Panel */}
+        <div style={{
+          backgroundColor: isDarkMode ? '#1e293b' : '#f8fafc',
+          borderRadius: '10px',
+          border: `1px solid ${border}`,
+          padding: '16px',
+          marginTop: '12px'
+        }}>
+          {/* Top Control Bar: Search Input, Filter Tabs, and Hide Dashboards Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: '300px', flexWrap: 'wrap' }}>
+              {/* Search text input */}
+              <div style={{ position: 'relative', width: '240px' }}>
+                <input
+                  type="text"
+                  placeholder="🔍 Search models or agents..."
+                  value={agentSearchQuery}
+                  onChange={(e) => setAgentSearchQuery(e.target.value)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '8px 28px 8px 12px',
+                    borderRadius: '8px',
+                    border: `1px solid ${border}`,
+                    backgroundColor: inputBg,
+                    color: text,
+                    fontSize: '13px',
+                    outline: 'none'
+                  }}
+                />
+                {agentSearchQuery && (
+                  <button
+                    onClick={() => setAgentSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: '8px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: muted,
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      padding: 0
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Tabs */}
+              <div style={{ display: 'flex', gap: '4px', backgroundColor: isDarkMode ? '#0f172a' : '#e2e8f0', padding: '3px', borderRadius: '8px', flexWrap: 'wrap' }}>
+                {[
+                  { id: 'with_feedback', label: `💬 With Feedback (${agentsWithFeedback.length})` },
+                  { id: 'needs_attention', label: `⚠️ Needs Attention (${allAvailableAgents.filter(a => a.negativeCount > 0 && (!filterExcludeDashboards || !a.isDashboard)).length})` },
+                  { id: 'custom_studio', label: `🤖 Studio Only (${allAvailableAgents.filter(a => a.isStudioAgent).length})` },
+                  { id: 'all', label: `All (${filteredAgents.length})` }
+                ].map(chip => (
+                  <button
+                    key={chip.id}
+                    onClick={() => setAgentFilterTab(chip.id)}
+                    style={{
+                      padding: '5px 10px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      backgroundColor: agentFilterTab === chip.id ? primary : 'transparent',
+                      color: agentFilterTab === chip.id ? '#ffffff' : text,
+                      fontSize: '12px',
+                      fontWeight: agentFilterTab === chip.id ? '600' : '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Hide Dashboard Sessions Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', userSelect: 'none', color: text, fontWeight: '500' }}>
+                <input
+                  type="checkbox"
+                  checked={filterExcludeDashboards}
+                  onChange={(e) => {
+                    setFilterExcludeDashboards(e.target.checked);
+                    setTablePage(1);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span>Hide Dashboard Sessions</span>
+              </label>
+              <span
+                title="Conversations initiated on Looker Dashboards create synthetic sessions (e.g. cymbal_pets::business_pulse). They are ad-hoc queries, not editable Agent Studio agents. Keep this checked to focus only on your real agents."
+                style={{ cursor: 'help', fontSize: '13px', color: muted }}
+              >
+                ℹ️
+              </span>
+            </div>
+          </div>
+
+          {/* Searchable Combobox Select + Quick Select Row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+            <label style={{ fontSize: '13px', fontWeight: '600', color: text, whiteSpace: 'nowrap' }}>Active Model:</label>
+            <select
+              value={selectedAgentId}
+              onChange={(e) => handleSelectAgent(e.target.value)}
+              disabled={loading}
+              style={{
+                flex: 1,
+                minWidth: '280px',
+                padding: '9px 12px',
+                borderRadius: '8px',
+                border: `1px solid ${border}`,
+                backgroundColor: inputBg,
+                color: text,
+                fontSize: '13px',
+                outline: 'none',
+                fontWeight: '500'
+              }}
+            >
+              <option value="All">🌐 All Models & Agents ({masterTelemetryRows.length || telemetryRows.length} total queries)</option>
+              {filteredAgents.map(a => {
+                const badge = a.feedbackCount > 0 
+                  ? `[${a.feedbackCount} feedback${a.negativeCount > 0 ? ` • ${a.negativeCount} 👎` : ' • 👍'}]`
+                  : '[0 feedback]';
+                const typeLabel = a.isStudioAgent ? 'Agent Studio' : (a.isDashboard ? 'Dashboard Session' : 'General');
+                return (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {badge} ({typeLabel})
+                  </option>
+                );
+              })}
+            </select>
+
+            {selectedAgentId !== 'All' && (
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: `1px solid ${border}`,
+                  color: primary,
+                  borderRadius: '8px',
+                  padding: '8px 14px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                ✕ Clear Selection
+              </button>
+            )}
+          </div>
+
+          {/* Quick-Select Feedback Pills Bar */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: muted }}>
+                Quick Select: Models with Live Feedback
+              </span>
+              <span style={{ fontSize: '11px', color: muted }}>
+                Click any model to isolate its feedback & telemetry
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', scrollbarWidth: 'thin' }}>
+              {/* All Models Pill */}
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '16px',
+                  border: selectedAgentId === 'All' ? `2px solid ${primary}` : `1px solid ${border}`,
+                  backgroundColor: selectedAgentId === 'All' ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                  color: selectedAgentId === 'All' ? primary : text,
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: selectedAgentId === 'All' ? '700' : '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
+                <span>🌐 All Overview</span>
+                <span style={{
+                  backgroundColor: selectedAgentId === 'All' ? primary : (isDarkMode ? '#334155' : '#e2e8f0'),
+                  color: selectedAgentId === 'All' ? '#ffffff' : text,
+                  padding: '1px 6px',
+                  borderRadius: '10px',
+                  fontSize: '11px',
+                  fontWeight: '700'
+                }}>
+                  {masterTelemetryRows.length || telemetryRows.length}
+                </span>
+              </button>
+
+              {/* Agent Pills */}
+              {agentsWithFeedback.slice(0, 20).map(a => {
+                const isSelected = String(selectedAgentId) === String(a.id);
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => handleSelectAgent(a.id)}
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: '16px',
+                      border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
+                      backgroundColor: isSelected ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
+                      color: isSelected ? primary : text,
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: isSelected ? '700' : '500',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
+                    }}
+                    title={`${a.name} • ${a.feedbackCount} total queries • ${a.negativeCount} negative feedback`}
+                  >
+                    <span>{a.isDashboard ? '📊' : '🤖'} {a.name}</span>
+                    <span style={{
+                      backgroundColor: isSelected ? primary : (a.negativeCount > 0 ? '#fee2e2' : (isDarkMode ? '#334155' : '#e2e8f0')),
+                      color: isSelected ? '#ffffff' : (a.negativeCount > 0 ? '#b91c1c' : text),
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      fontSize: '11px',
+                      fontWeight: '700'
+                    }}>
+                      {a.feedbackCount}
+                    </span>
+                    {a.negativeCount > 0 && <span style={{ fontSize: '11px' }}>⚠️</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Active Model Banner */}
+          {selectedAgentId !== 'All' && (
+            <div style={{
+              marginTop: '12px',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              backgroundColor: isDarkMode ? '#0f172a' : '#eff6ff',
+              border: `1px solid ${isDarkMode ? '#334155' : '#bfdbfe'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '8px',
+              fontSize: '12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '14px' }}>🎯</span>
+                <span>Active Filter: <strong style={{ color: text }}>{editName || selectedAgentId}</strong></span>
+                <span style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: currentAgent?.isDashboard ? '#fef3c7' : '#dbeafe',
+                  color: currentAgent?.isDashboard ? '#92400e' : '#1e40af',
+                  fontWeight: '600'
+                }}>
+                  {currentAgent?.isDashboard ? 'Dashboard Session' : 'Agent Studio Agent'}
+                </span>
+                <span style={{ color: muted }}>
+                  &bull; {telemetryRows.length} matching feedback queries
+                </span>
+              </div>
+              <button
+                onClick={() => handleSelectAgent('All')}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: primary,
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  padding: 0
+                }}
+              >
+                ✕ View All Models
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Primary Navigation Tabs - ON TOP */}
-      <div style={{
-        display: 'flex',
-        gap: '4px',
-        borderBottom: `2px solid ${border}`,
-        marginBottom: '20px',
-        backgroundColor: cardBg,
-        borderRadius: '10px 10px 0 0',
-        padding: '6px 12px 0 12px',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-        flexWrap: 'wrap'
-      }}>
+      {/* Navigation Tabs */}
+      <div style={{ display: 'flex', gap: '8px', borderBottom: `1px solid ${border}`, marginBottom: '24px', flexWrap: 'wrap' }}>
         {[
           { id: 'analytics', label: '📊 Analytics & Feedback' },
           { id: 'details', label: '⚙️ Agent Details & Live Preview' },
@@ -661,163 +1051,20 @@ export const App = ({ isStandalone = false }) => {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
-              padding: '11px 18px',
+              padding: '10px 20px',
               background: 'none',
               border: 'none',
               borderBottom: activeTab === tab.id ? `3px solid ${primary}` : '3px solid transparent',
               color: activeTab === tab.id ? primary : muted,
-              fontWeight: activeTab === tab.id ? '700' : '500',
+              fontWeight: activeTab === tab.id ? '600' : '500',
               cursor: 'pointer',
-              fontSize: '14px',
-              marginBottom: '-2px',
-              transition: 'all 0.15s ease'
+              fontSize: '15px'
             }}
           >
             {tab.label}
           </button>
         ))}
       </div>
-
-      {/* Model Selector Bar with Pills (for Analytics, Details, Optimizer) */}
-      {activeTab !== 'architecture' && (
-        <div style={{
-          backgroundColor: cardBg,
-          borderRadius: '10px',
-          border: `1px solid ${border}`,
-          padding: '12px 16px',
-          marginBottom: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          flexWrap: 'wrap',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
-        }}>
-          <span style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px', color: muted, whiteSpace: 'nowrap' }}>
-            Model:
-          </span>
-
-          {/* Quick-Select Pills */}
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', flex: 1 }}>
-            {/* All Models Pill */}
-            <button
-              onClick={() => handleSelectAgent('All')}
-              style={{
-                padding: '5px 13px',
-                borderRadius: '16px',
-                border: selectedAgentId === 'All' ? `2px solid ${primary}` : `1px solid ${border}`,
-                backgroundColor: selectedAgentId === 'All' ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
-                color: selectedAgentId === 'All' ? primary : text,
-                cursor: 'pointer',
-                fontSize: '12px',
-                fontWeight: selectedAgentId === 'All' ? '700' : '500',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              <span>🌐 All Models</span>
-              <span style={{
-                backgroundColor: selectedAgentId === 'All' ? primary : (isDarkMode ? '#334155' : '#e2e8f0'),
-                color: selectedAgentId === 'All' ? '#ffffff' : text,
-                padding: '1px 6px',
-                borderRadius: '10px',
-                fontSize: '11px',
-                fontWeight: '700'
-              }}>
-                {masterTelemetryRows.length || telemetryRows.length}
-              </span>
-            </button>
-
-            {/* Model Pills with Live Feedback */}
-            {agentsWithFeedback.map(a => {
-              const isSelected = String(selectedAgentId) === String(a.id);
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => handleSelectAgent(a.id)}
-                  style={{
-                    padding: '5px 13px',
-                    borderRadius: '16px',
-                    border: isSelected ? `2px solid ${primary}` : `1px solid ${border}`,
-                    backgroundColor: isSelected ? (isDarkMode ? '#1e3a8a' : '#eff6ff') : (isDarkMode ? '#0f172a' : '#ffffff'),
-                    color: isSelected ? primary : text,
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: isSelected ? '700' : '500',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    whiteSpace: 'nowrap'
-                  }}
-                  title={`${a.name} • ${a.feedbackCount} feedback • ${a.negativeCount} negative feedback`}
-                >
-                  <span>{a.isDashboard ? '📊' : '🤖'} {a.name}</span>
-                  <span style={{
-                    backgroundColor: isSelected ? primary : (a.negativeCount > 0 ? '#fee2e2' : (isDarkMode ? '#334155' : '#e2e8f0')),
-                    color: isSelected ? '#ffffff' : (a.negativeCount > 0 ? '#b91c1c' : text),
-                    padding: '1px 6px',
-                    borderRadius: '10px',
-                    fontSize: '11px',
-                    fontWeight: '700'
-                  }}>
-                    {a.feedbackCount}
-                  </span>
-                  {a.negativeCount > 0 && <span style={{ fontSize: '11px' }}>⚠️</span>}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Quick Clear or Dropdown for other agents */}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <select
-              value={selectedAgentId}
-              onChange={(e) => handleSelectAgent(e.target.value)}
-              disabled={loading}
-              title="Select any agent or model in the system"
-              style={{
-                padding: '4px 8px',
-                borderRadius: '6px',
-                border: `1px solid ${border}`,
-                backgroundColor: inputBg,
-                color: muted,
-                fontSize: '11px',
-                outline: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              <option value="All">All Models ({masterTelemetryRows.length || telemetryRows.length})</option>
-              {allAvailableAgents
-                .filter(a => !a.isDashboard)
-                .map(a => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.feedbackCount} feedback)
-                  </option>
-                ))}
-            </select>
-
-            {selectedAgentId !== 'All' && (
-              <button
-                onClick={() => handleSelectAgent('All')}
-                style={{
-                  backgroundColor: 'transparent',
-                  border: `1px solid ${border}`,
-                  color: primary,
-                  borderRadius: '6px',
-                  padding: '3px 8px',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                ✕ Reset
-              </button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* TAB 1: Analytics & Feedback */}
       {activeTab === 'analytics' && (
@@ -1639,41 +1886,122 @@ export const App = ({ isStandalone = false }) => {
                 </div>
               </div>
 
-              {/* Architecture Info & BQML Config Bar */}
+              {/* Architecture Selector Bar */}
               <div style={{
                 backgroundColor: cardBg,
-                borderRadius: '10px',
+                borderRadius: '8px',
                 border: `1px solid ${border}`,
-                padding: '16px 20px',
-                marginBottom: '20px',
+                padding: '12px 18px',
+                marginBottom: '16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
-                gap: '16px',
+                gap: '12px',
                 fontSize: '13px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '18px' }}>⚡</span>
-                    <strong style={{ color: text }}>BigQuery ML Remote Model</strong>
-                    <span style={{ fontSize: '11px', color: muted }}>(Explore Assistant Pattern)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontWeight: '600' }}>Architecture Pattern:</span>
+                  <div style={{ display: 'flex', backgroundColor: inputBg, borderRadius: '6px', border: `1px solid ${border}`, padding: '2px' }}>
+                    <button
+                      onClick={() => setOptimizerBackend('bqml')}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: optimizerBackend === 'bqml' ? '700' : '400',
+                        backgroundColor: optimizerBackend === 'bqml' ? primary : 'transparent',
+                        color: optimizerBackend === 'bqml' ? '#ffffff' : text,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <span>⚡ BigQuery ML</span>
+                      <span style={{ fontSize: '10px', opacity: 0.8 }}>(Explore Assistant Pattern)</span>
+                    </button>
+                    <button
+                      onClick={() => setOptimizerBackend('cloud_run')}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: optimizerBackend === 'cloud_run' ? '700' : '400',
+                        backgroundColor: optimizerBackend === 'cloud_run' ? primary : 'transparent',
+                        color: optimizerBackend === 'cloud_run' ? '#ffffff' : text,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <span>☁️ Cloud Run</span>
+                    </button>
                   </div>
-                  <span style={{
-                    backgroundColor: '#dcfce7',
-                    color: '#166534',
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '3px 8px',
-                    borderRadius: '10px'
-                  }}>
-                    ✓ Looker Core API (Native SQL • Zero IAP / Serverless)
-                  </span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', flex: 1, minWidth: '320px', justifyContent: 'flex-end' }}>
+                {optimizerBackend === 'bqml' ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <label style={{ fontWeight: '600', color: text, fontSize: '12px' }}>Connection:</label>
+                    <span style={{
+                      backgroundColor: '#dcfce7',
+                      color: '#166534',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      padding: '3px 8px',
+                      borderRadius: '10px'
+                    }}>
+                      ✓ Looker Core API (No external servers / No IAP redirect)
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      backgroundColor: gcpToken ? '#dcfce7' : '#fef9c3',
+                      color: gcpToken ? '#166534' : '#854d0e',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      padding: '3px 8px',
+                      borderRadius: '10px'
+                    }}>
+                      {gcpToken ? '✓ Auth Token Configured' : 'domain:google.com (requires token)'}
+                    </span>
+                    <button
+                      onClick={() => setShowTokenInput(!showTokenInput)}
+                      style={{
+                        background: 'none',
+                        border: `1px solid ${border}`,
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        color: text
+                      }}
+                    >
+                      {showTokenInput ? 'Close Auth' : '🔑 GCP Auth Token'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* BQML Configuration Bar */}
+              {optimizerBackend === 'bqml' && (
+                <div style={{
+                  backgroundColor: cardBg,
+                  borderRadius: '8px',
+                  border: `1px solid ${border}`,
+                  padding: '12px 18px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  flexWrap: 'wrap',
+                  fontSize: '13px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label style={{ fontWeight: '600', color: text }}>BigQuery Connection:</label>
                     {availableBqConnections.length > 0 ? (
                       <select
                         value={bqConnection}
@@ -1696,9 +2024,9 @@ export const App = ({ isStandalone = false }) => {
                         type="text"
                         value={bqConnection}
                         onChange={(e) => setBqConnection(e.target.value)}
-                        placeholder="default_bigquery_connection"
+                        placeholder="bigquery"
                         style={{
-                          width: '180px',
+                          width: '140px',
                           padding: '6px 10px',
                           borderRadius: '6px',
                           border: `1px solid ${border}`,
@@ -1710,13 +2038,13 @@ export const App = ({ isStandalone = false }) => {
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '280px' }}>
-                    <label style={{ fontWeight: '600', color: text, fontSize: '12px' }}>Remote Model:</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '280px' }}>
+                    <label style={{ fontWeight: '600', color: text }}>Remote Model ID:</label>
                     <input
                       type="text"
                       value={bqModelId}
                       onChange={(e) => setBqModelId(e.target.value)}
-                      placeholder="cloud-looker-devrel-demos.agent_optimizer_us.gemini_model"
+                      placeholder="project.dataset.gemini_model"
                       style={{
                         flex: 1,
                         padding: '6px 10px',
@@ -1724,13 +2052,115 @@ export const App = ({ isStandalone = false }) => {
                         border: `1px solid ${border}`,
                         fontSize: '12px',
                         backgroundColor: inputBg,
-                        color: text,
-                        fontFamily: 'monospace'
+                        color: text
                       }}
                     />
                   </div>
                 </div>
-              </div>
+              )}
+
+              {/* Cloud Run Connection & Auth Bar */}
+              {optimizerBackend === 'cloud_run' && (
+                <div style={{
+                  backgroundColor: cardBg,
+                  borderRadius: '8px',
+                  border: `1px solid ${border}`,
+                  padding: '12px 18px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '13px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '16px' }}>☁️</span>
+                    <span><strong>Cloud Run Backend:</strong> <code>https://agent-optimizer-backend-ofamr32cra-uc.a.run.app</code></span>
+                  </div>
+                </div>
+              )}
+
+              {showTokenInput && (
+                <div style={{
+                  backgroundColor: cardBg,
+                  borderRadius: '8px',
+                  border: '1px solid #bfdbfe',
+                  padding: '16px',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
+                    Google Cloud Identity Token for Cloud Run (Required by Corp Org Policy)
+                  </div>
+                  <p style={{ fontSize: '12px', color: muted, margin: '0 0 10px 0' }}>
+                    Generate an identity token on your terminal with: <code>gcloud auth print-identity-token</code>
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="password"
+                      placeholder="Paste identity token here (eyJhbGci...)"
+                      value={gcpToken}
+                      onChange={(e) => setGcpToken(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        border: `1px solid ${border}`,
+                        fontSize: '12px',
+                        backgroundColor: inputBg,
+                        color: text
+                      }}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
+                          await extensionSDK.localStorageSetItem("gcp_auth_token", gcpToken.trim()).catch(() => {});
+                        }
+                        setTokenSavedMsg("✓ Token saved to Looker extension storage!");
+                        setTimeout(() => setTokenSavedMsg(''), 3000);
+                      }}
+                      style={{
+                        backgroundColor: primary,
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '8px 16px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Save Token
+                    </button>
+                    {gcpToken && (
+                      <button
+                        onClick={async () => {
+                          setGcpToken("");
+                          if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
+                            await extensionSDK.localStorageSetItem("gcp_auth_token", "").catch(() => {});
+                          }
+                          setTokenSavedMsg("Cleared token.");
+                          setTimeout(() => setTokenSavedMsg(''), 3000);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: `1px solid ${border}`,
+                          borderRadius: '6px',
+                          padding: '8px 12px',
+                          fontSize: '12px',
+                          color: '#ef4444',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {tokenSavedMsg && (
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#16a34a', fontWeight: '500' }}>
+                      {tokenSavedMsg}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Error Message */}
               {optimizationError && (
@@ -1991,65 +2421,51 @@ export const App = ({ isStandalone = false }) => {
                   Looker Agent Optimizer — System & Data Architecture
                 </h2>
                 <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: muted }}>
-                  Native BigQuery ML Remote Model Architecture (Explore Assistant Pattern) &bull; Looker Core 4.0 API &bull; Vertex AI Gemini 3.8 Flash
+                  Closed-loop observability, agent configuration management, and autonomous prompt optimization powered by Google Cloud & Vertex AI.
                 </p>
               </div>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px' }}>
-              <span style={{ backgroundColor: isDarkMode ? '#1e3a8a' : '#dbeafe', color: isDarkMode ? '#93c5fd' : '#1e40af', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
-                ⚡ Native Looker SQL Execution
-              </span>
-              <span style={{ backgroundColor: isDarkMode ? '#064e3b' : '#dcfce7', color: isDarkMode ? '#6ee7b7' : '#166534', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
-                🔒 Zero External Microservices / Zero IAP Blocks
-              </span>
-              <span style={{ backgroundColor: isDarkMode ? '#4c1d95' : '#f3e8ff', color: isDarkMode ? '#c4b5fd' : '#6b21a8', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
-                🏛️ BigQuery Cloud Resource Connection (vertex_conn_us)
-              </span>
-              <span style={{ backgroundColor: isDarkMode ? '#78350f' : '#fef3c7', color: isDarkMode ? '#fde68a' : '#92400e', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
-                🚀 Vertex AI gemini-3.8-flash Remote Model
-              </span>
             </div>
           </div>
 
           {/* End-to-End Pipeline Visualization */}
           <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '24px' }}>
             <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: '700', color: text }}>
-              🔄 End-to-End Optimization Lifecycle (Explore Assistant Pattern)
+              🔄 End-to-End Optimization Lifecycle
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               {[
                 {
                   step: '1',
                   title: 'Telemetry Ingestion',
-                  desc: 'Looker Core system__activity conversations_feedback captures live user prompts, latency, health status, and ratings.',
+                  desc: 'Looker Core system__activity conversations_feedback explore captures live user prompts, latency, health status, and ratings.',
                   icon: '📥',
                   color: '#3b82f6'
                 },
                 {
                   step: '2',
                   title: 'Agent Introspection',
-                  desc: 'Looker Core 4.0 API extracts system instructions, linked LookML explores, code interpreter settings, and telemetry history.',
+                  desc: 'Looker Core 4.0 API extracts system instructions, linked LookML explores, code interpreter flags, and golden queries.',
                   icon: '🔍',
                   color: '#8b5cf6'
                 },
                 {
                   step: '3',
-                  title: 'BQML SQL Synthesis',
-                  desc: 'Extension formats agent prompt instructions and negative telemetry into a native BigQuery ML.GENERATE_TEXT query.',
-                  icon: '⚡',
+                  title: 'Secure OIDC Proxy',
+                  desc: 'Extension SDK obtains Google OAuth 2.0 ID Token and securely relays telemetry through Looker fetchProxy/serverProxy.',
+                  icon: '🔐',
                   color: '#f59e0b'
                 },
                 {
                   step: '4',
-                  title: 'Vertex AI Remote Model',
-                  desc: 'BigQuery executes ML.GENERATE_TEXT via Cloud Resource connection (vertex_conn_us) targeting Gemini 3.8 Flash over Looker Core SQL.',
+                  title: 'Vertex AI Reasoning',
+                  desc: 'Cloud Run service invokes Gemini 2.5 Flash to diagnose query degradation, calculate precision scores, and draft prompt refinements.',
                   icon: '🧠',
                   color: '#10b981'
                 },
                 {
                   step: '5',
                   title: '1-Click Looker Sync',
-                  desc: 'Diagnosed prompt rewrites and explore suggestions are written directly back into Looker Agent Studio via the Core 4.0 API.',
+                  desc: 'Validated prompt instructions and explore mappings are written directly back into Looker via the Core 4.0 API.',
                   icon: '🚀',
                   color: '#06b6d4'
                 }
@@ -2168,7 +2584,7 @@ export const App = ({ isStandalone = false }) => {
                 Autonomous reasoning engine that analyzes telemetry failure modes and drafts targeted instruction refinements.
               </p>
               <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
-                <strong>Data Source & Engine:</strong> BigQuery ML <code>ML.GENERATE_TEXT</code> &bull; Vertex AI Remote Model (<code>gemini-3.8-flash</code>)
+                <strong>Data Source & Engine:</strong> Google Cloud Run &bull; Vertex AI (Gemini 2.5 Flash)
               </div>
               <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
                 <strong>Data Generated & Displayed:</strong>
@@ -2182,7 +2598,7 @@ export const App = ({ isStandalone = false }) => {
                 </ul>
               </div>
               <div style={{ fontSize: '12px', color: text }}>
-                <strong>Interactive Controls:</strong> Looker BigQuery Connection selector, <em>"Run Autonomous AI Optimization"</em>, and <em>"Apply Suggested Instructions to Agent"</em>.
+                <strong>Interactive Controls:</strong> 1-click Google OAuth Sign-In, <em>"Run Autonomous AI Optimization"</em>, and <em>"Apply Suggested Instructions to Agent"</em>.
               </div>
             </div>
 
@@ -2200,10 +2616,10 @@ export const App = ({ isStandalone = false }) => {
               <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
                 <strong>Key Specifications Covered:</strong>
                 <ul style={{ margin: '4px 0 0 16px', padding: 0, color: muted, lineHeight: '1.6' }}>
-                  <li><strong>Explore Assistant Pattern:</strong> Native Looker SQL runner execution using <code>create_sql_query</code>.</li>
-                  <li><strong>Serverless BigQuery ML:</strong> Direct Vertex AI inference via BigQuery Cloud Resource Connection.</li>
-                  <li><strong>Zero External Hosting:</strong> No standalone Cloud Run services or IAP authentication proxies needed.</li>
-                  <li><strong>Unified Enterprise Governance:</strong> Governed through standard Looker DB connection permissions.</li>
+                  <li><strong>Zero-Trust OAuth 2.0:</strong> Looker Extension SDK integration with Google Cloud IAM.</li>
+                  <li><strong>Cloud Run Security:</strong> <code>--no-allow-unauthenticated</code> enforcement with Google domain validation.</li>
+                  <li><strong>Iframe Sandbox Isolation:</strong> Safe token storage using <code>extensionSDK.localStorage</code>.</li>
+                  <li><strong>Network Routing:</strong> Looker <code>fetchProxy</code> and <code>serverProxy</code> CORS abstraction.</li>
                 </ul>
               </div>
             </div>
@@ -2218,28 +2634,28 @@ export const App = ({ isStandalone = false }) => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: '16px', borderRadius: '8px', border: `1px solid ${border}` }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px', color: text }}>
-                  🛡️ Looker Database Connection Governance
+                  🛡️ Google Cloud OAuth 2.0 (OIDC)
                 </div>
                 <div style={{ fontSize: '12px', color: muted, lineHeight: '1.5' }}>
-                  The optimizer executes SQL directly through Looker's managed database connection (<code>default_bigquery_connection</code>). It relies on standard GCP service account credentials configured in Looker Admin—eliminating the need for client-side OAuth popups or user token management.
+                  The extension uses <code>extensionSDK.oauth2Authenticate</code> to initiate an OpenID Connect flow against <code>accounts.google.com</code>. It retrieves a signed Google <code>id_token</code> without exposing user passwords or long-lived service account keys.
                 </div>
               </div>
 
               <div style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: '16px', borderRadius: '8px', border: `1px solid ${border}` }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px', color: text }}>
-                  🏢 BigQuery Cloud Resource Connection
+                  🏢 Enterprise Cloud Run Authorization
                 </div>
                 <div style={{ fontSize: '12px', color: muted, lineHeight: '1.5' }}>
-                  BigQuery connects to Vertex AI using a Google Cloud Resource Connection (<code>vertex_conn_us</code>). The BigQuery connection service account is granted <code>roles/aiplatform.user</code>, ensuring all LLM inference occurs securely within Google Cloud's private network.
+                  The backend service enforces <code>--no-allow-unauthenticated</code>, restricted to <code>domain:google.com</code>. The incoming Bearer <code>id_token</code> is verified cryptographically by Google Cloud Run infrastructure before requests reach Vertex AI.
                 </div>
               </div>
 
               <div style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: '16px', borderRadius: '8px', border: `1px solid ${border}` }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px', color: text }}>
-                  🗄️ Zero External Microservices (No IAP / CORS)
+                  🗄️ Extension Sandbox Storage
                 </div>
                 <div style={{ fontSize: '12px', color: muted, lineHeight: '1.5' }}>
-                  By adopting Looker's official Explore Assistant architecture, external Cloud Run servers and IAP proxies are completely eliminated. All requests stay inside Looker Core API boundaries, ensuring seamless execution across sandboxed iframes.
+                  To comply with Looker's <code>data:</code> sandboxed iframe policy, tokens are stored via <code>extensionSDK.localStorageSetItem</code> rather than <code>window.localStorage</code>, preventing <code>SecurityError</code> DOM exceptions.
                 </div>
               </div>
             </div>
@@ -2286,10 +2702,10 @@ export const App = ({ isStandalone = false }) => {
                     <td style={{ padding: '12px 16px', color: muted }}>conversation_id, user_message</td>
                   </tr>
                   <tr>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>create_sql_query / run_sql_query (BigQuery ML)</td>
-                    <td style={{ padding: '12px 16px' }}>Looker Core 4.0 SQL API</td>
-                    <td style={{ padding: '12px 16px' }}>Vertex AI Gemini 3.8 Flash optimization</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>connection_name: default_bigquery_connection, ML.GENERATE_TEXT(MODEL ...)</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>/api/optimize-agent (Cloud Run)</td>
+                    <td style={{ padding: '12px 16px' }}>Looker fetchProxy (HTTPS)</td>
+                    <td style={{ padding: '12px 16px' }}>Gemini 2.5 Flash optimization</td>
+                    <td style={{ padding: '12px 16px', color: muted }}>Bearer id_token, agentConfig, telemetryRows</td>
                   </tr>
                 </tbody>
               </table>
