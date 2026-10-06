@@ -7,7 +7,6 @@ import {
   createConversation,
   sendChatMessage,
   runTelemetryQuery,
-  requestAgentOptimization,
   requestBqmlAgentOptimization,
   getBigQueryConnections,
   DEFAULT_BQ_CONNECTION,
@@ -48,84 +47,15 @@ export const App = ({ isStandalone = false }) => {
   const [saveStatus, setSaveStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // AI Optimizer Agent State
+  // AI Optimizer Agent State (Native BigQuery ML Architecture)
   const [optimizationReport, setOptimizationReport] = useState(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationError, setOptimizationError] = useState('');
-  const [gcpToken, setGcpToken] = useState('');
-  const [showTokenInput, setShowTokenInput] = useState(false);
-  const [tokenSavedMsg, setTokenSavedMsg] = useState('');
-  const [googleClientId, setGoogleClientId] = useState("82452831399-dijmme0rntvi0d8ro8g24rl9fnbjrq0d.apps.googleusercontent.com");
-  const [isSigningIn, setIsSigningIn] = useState(false);
   
   // BQML Architecture Settings (Explore Assistant pattern)
-  const [optimizerBackend, setOptimizerBackend] = useState('bqml'); // 'bqml' | 'cloud_run'
   const [bqConnection, setBqConnection] = useState(DEFAULT_BQ_CONNECTION);
   const [bqModelId, setBqModelId] = useState(DEFAULT_BQ_MODEL_ID);
   const [availableBqConnections, setAvailableBqConnections] = useState([]);
-
-  const handleGoogleSignIn = async () => {
-    setIsSigningIn(true);
-    setTokenSavedMsg("");
-    try {
-      if (!extensionSDK || typeof extensionSDK.oauth2Authenticate !== "function") {
-        throw new Error("Looker Extension SDK oauth2Authenticate is not available.");
-      }
-
-      const nonce = Math.random().toString(36).substring(2) + Date.now().toString(36);
-      const authResponse = await extensionSDK.oauth2Authenticate(
-        "https://accounts.google.com/o/oauth2/v2/auth",
-        {
-          client_id: googleClientId.trim(),
-          scope: "openid email profile",
-          response_type: "id_token",
-          nonce: nonce
-        }
-      );
-
-      const token = authResponse?.access_token || authResponse?.id_token;
-      if (token) {
-        setGcpToken(token);
-        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
-          await extensionSDK.localStorageSetItem("gcp_auth_token", token).catch(() => {});
-        }
-        if (extensionSDK && typeof extensionSDK.userAttributeSetItem === "function") {
-          await extensionSDK.userAttributeSetItem("backend_token", token).catch(() => {});
-        }
-        setTokenSavedMsg("✓ Successfully authenticated with Google!");
-        setTimeout(() => setTokenSavedMsg(""), 4000);
-        return token;
-      } else {
-        throw new Error("No token returned from Google authentication popup.");
-      }
-    } catch (err) {
-      console.error("Google OAuth sign-in error:", err);
-      setTokenSavedMsg(`Google Sign-In: ${err.message || err}`);
-      return null;
-    } finally {
-      setIsSigningIn(false);
-    }
-  };
-
-  // Load saved GCP token via Extension SDK storage & Looker user attributes
-  useEffect(() => {
-    if (extensionSDK) {
-      if (typeof extensionSDK.userAttributeGetItem === "function") {
-        extensionSDK.userAttributeGetItem("backend_token")
-          .then((val) => {
-            if (val) setGcpToken(val);
-          })
-          .catch(() => {});
-      }
-      if (typeof extensionSDK.localStorageGetItem === "function") {
-        extensionSDK.localStorageGetItem("gcp_auth_token")
-          .then((val) => {
-            if (val) setGcpToken(prev => prev || val);
-          })
-          .catch(() => {});
-      }
-    }
-  }, [extensionSDK]);
   
   // Discover available BigQuery connections in Looker for BQML optimization
   useEffect(() => {
@@ -658,28 +588,14 @@ export const App = ({ isStandalone = false }) => {
         code_interpreter: codeInterpreter
       };
 
-      let report;
-      if (optimizerBackend === 'bqml') {
-        // Execute via BigQuery ML (Explore Assistant Pattern - native Looker Core API, no external servers/IAP required)
-        report = await requestBqmlAgentOptimization({
-          coreSDK,
-          agentConfig,
-          telemetryRows,
-          connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
-          modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
-        });
-      } else {
-        // Execute via Cloud Run backend
-        let activeToken = gcpToken;
-        if (!activeToken && extensionSDK && typeof extensionSDK.oauth2Authenticate === "function") {
-          activeToken = await handleGoogleSignIn();
-          if (!activeToken) {
-            setIsOptimizing(false);
-            return;
-          }
-        }
-        report = await requestAgentOptimization(agentConfig, telemetryRows, activeToken, extensionSDK);
-      }
+      // Execute natively via BigQuery ML Remote Model (Explore Assistant Pattern)
+      const report = await requestBqmlAgentOptimization({
+        coreSDK,
+        agentConfig,
+        telemetryRows,
+        connectionName: bqConnection.trim() || DEFAULT_BQ_CONNECTION,
+        modelId: bqModelId.trim() || DEFAULT_BQ_MODEL_ID
+      });
 
       setOptimizationReport(report);
     } catch (err) {
@@ -1886,122 +1802,41 @@ export const App = ({ isStandalone = false }) => {
                 </div>
               </div>
 
-              {/* Architecture Selector Bar */}
+              {/* Architecture Info & BQML Config Bar */}
               <div style={{
                 backgroundColor: cardBg,
-                borderRadius: '8px',
+                borderRadius: '10px',
                 border: `1px solid ${border}`,
-                padding: '12px 18px',
-                marginBottom: '16px',
+                padding: '16px 20px',
+                marginBottom: '20px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
-                gap: '12px',
+                gap: '16px',
                 fontSize: '13px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontWeight: '600' }}>Architecture Pattern:</span>
-                  <div style={{ display: 'flex', backgroundColor: inputBg, borderRadius: '6px', border: `1px solid ${border}`, padding: '2px' }}>
-                    <button
-                      onClick={() => setOptimizerBackend('bqml')}
-                      style={{
-                        padding: '4px 12px',
-                        borderRadius: '4px',
-                        border: 'none',
-                        fontSize: '12px',
-                        fontWeight: optimizerBackend === 'bqml' ? '700' : '400',
-                        backgroundColor: optimizerBackend === 'bqml' ? primary : 'transparent',
-                        color: optimizerBackend === 'bqml' ? '#ffffff' : text,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <span>⚡ BigQuery ML</span>
-                      <span style={{ fontSize: '10px', opacity: 0.8 }}>(Explore Assistant Pattern)</span>
-                    </button>
-                    <button
-                      onClick={() => setOptimizerBackend('cloud_run')}
-                      style={{
-                        padding: '4px 12px',
-                        borderRadius: '4px',
-                        border: 'none',
-                        fontSize: '12px',
-                        fontWeight: optimizerBackend === 'cloud_run' ? '700' : '400',
-                        backgroundColor: optimizerBackend === 'cloud_run' ? primary : 'transparent',
-                        color: optimizerBackend === 'cloud_run' ? '#ffffff' : text,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <span>☁️ Cloud Run</span>
-                    </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>⚡</span>
+                    <strong style={{ color: text }}>BigQuery ML Remote Model</strong>
+                    <span style={{ fontSize: '11px', color: muted }}>(Explore Assistant Pattern)</span>
                   </div>
+                  <span style={{
+                    backgroundColor: '#dcfce7',
+                    color: '#166534',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    padding: '3px 8px',
+                    borderRadius: '10px'
+                  }}>
+                    ✓ Looker Core API (Native SQL • Zero IAP / Serverless)
+                  </span>
                 </div>
 
-                {optimizerBackend === 'bqml' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', flex: 1, minWidth: '320px', justifyContent: 'flex-end' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{
-                      backgroundColor: '#dcfce7',
-                      color: '#166534',
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      padding: '3px 8px',
-                      borderRadius: '10px'
-                    }}>
-                      ✓ Looker Core API (No external servers / No IAP redirect)
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{
-                      backgroundColor: gcpToken ? '#dcfce7' : '#fef9c3',
-                      color: gcpToken ? '#166534' : '#854d0e',
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      padding: '3px 8px',
-                      borderRadius: '10px'
-                    }}>
-                      {gcpToken ? '✓ Auth Token Configured' : 'domain:google.com (requires token)'}
-                    </span>
-                    <button
-                      onClick={() => setShowTokenInput(!showTokenInput)}
-                      style={{
-                        background: 'none',
-                        border: `1px solid ${border}`,
-                        borderRadius: '6px',
-                        padding: '4px 10px',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                        color: text
-                      }}
-                    >
-                      {showTokenInput ? 'Close Auth' : '🔑 GCP Auth Token'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* BQML Configuration Bar */}
-              {optimizerBackend === 'bqml' && (
-                <div style={{
-                  backgroundColor: cardBg,
-                  borderRadius: '8px',
-                  border: `1px solid ${border}`,
-                  padding: '12px 18px',
-                  marginBottom: '20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  flexWrap: 'wrap',
-                  fontSize: '13px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <label style={{ fontWeight: '600', color: text }}>BigQuery Connection:</label>
+                    <label style={{ fontWeight: '600', color: text, fontSize: '12px' }}>Connection:</label>
                     {availableBqConnections.length > 0 ? (
                       <select
                         value={bqConnection}
@@ -2024,9 +1859,9 @@ export const App = ({ isStandalone = false }) => {
                         type="text"
                         value={bqConnection}
                         onChange={(e) => setBqConnection(e.target.value)}
-                        placeholder="bigquery"
+                        placeholder="default_bigquery_connection"
                         style={{
-                          width: '140px',
+                          width: '180px',
                           padding: '6px 10px',
                           borderRadius: '6px',
                           border: `1px solid ${border}`,
@@ -2038,13 +1873,13 @@ export const App = ({ isStandalone = false }) => {
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '280px' }}>
-                    <label style={{ fontWeight: '600', color: text }}>Remote Model ID:</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '280px' }}>
+                    <label style={{ fontWeight: '600', color: text, fontSize: '12px' }}>Remote Model:</label>
                     <input
                       type="text"
                       value={bqModelId}
                       onChange={(e) => setBqModelId(e.target.value)}
-                      placeholder="project.dataset.gemini_model"
+                      placeholder="cloud-looker-devrel-demos.agent_optimizer_us.gemini_model"
                       style={{
                         flex: 1,
                         padding: '6px 10px',
@@ -2052,115 +1887,13 @@ export const App = ({ isStandalone = false }) => {
                         border: `1px solid ${border}`,
                         fontSize: '12px',
                         backgroundColor: inputBg,
-                        color: text
+                        color: text,
+                        fontFamily: 'monospace'
                       }}
                     />
                   </div>
                 </div>
-              )}
-
-              {/* Cloud Run Connection & Auth Bar */}
-              {optimizerBackend === 'cloud_run' && (
-                <div style={{
-                  backgroundColor: cardBg,
-                  borderRadius: '8px',
-                  border: `1px solid ${border}`,
-                  padding: '12px 18px',
-                  marginBottom: '20px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: '13px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '16px' }}>☁️</span>
-                    <span><strong>Cloud Run Backend:</strong> <code>https://agent-optimizer-backend-ofamr32cra-uc.a.run.app</code></span>
-                  </div>
-                </div>
-              )}
-
-              {showTokenInput && (
-                <div style={{
-                  backgroundColor: cardBg,
-                  borderRadius: '8px',
-                  border: '1px solid #bfdbfe',
-                  padding: '16px',
-                  marginBottom: '20px'
-                }}>
-                  <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                    Google Cloud Identity Token for Cloud Run (Required by Corp Org Policy)
-                  </div>
-                  <p style={{ fontSize: '12px', color: muted, margin: '0 0 10px 0' }}>
-                    Generate an identity token on your terminal with: <code>gcloud auth print-identity-token</code>
-                  </p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="password"
-                      placeholder="Paste identity token here (eyJhbGci...)"
-                      value={gcpToken}
-                      onChange={(e) => setGcpToken(e.target.value)}
-                      style={{
-                        flex: 1,
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        border: `1px solid ${border}`,
-                        fontSize: '12px',
-                        backgroundColor: inputBg,
-                        color: text
-                      }}
-                    />
-                    <button
-                      onClick={async () => {
-                        if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
-                          await extensionSDK.localStorageSetItem("gcp_auth_token", gcpToken.trim()).catch(() => {});
-                        }
-                        setTokenSavedMsg("✓ Token saved to Looker extension storage!");
-                        setTimeout(() => setTokenSavedMsg(''), 3000);
-                      }}
-                      style={{
-                        backgroundColor: primary,
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '8px 16px',
-                        fontSize: '12px',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Save Token
-                    </button>
-                    {gcpToken && (
-                      <button
-                        onClick={async () => {
-                          setGcpToken("");
-                          if (extensionSDK && typeof extensionSDK.localStorageSetItem === "function") {
-                            await extensionSDK.localStorageSetItem("gcp_auth_token", "").catch(() => {});
-                          }
-                          setTokenSavedMsg("Cleared token.");
-                          setTimeout(() => setTokenSavedMsg(''), 3000);
-                        }}
-                        style={{
-                          background: 'none',
-                          border: `1px solid ${border}`,
-                          borderRadius: '6px',
-                          padding: '8px 12px',
-                          fontSize: '12px',
-                          color: '#ef4444',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  {tokenSavedMsg && (
-                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#16a34a', fontWeight: '500' }}>
-                      {tokenSavedMsg}
-                    </div>
-                  )}
-                </div>
-              )}
+              </div>
 
               {/* Error Message */}
               {optimizationError && (
@@ -2421,51 +2154,65 @@ export const App = ({ isStandalone = false }) => {
                   Looker Agent Optimizer — System & Data Architecture
                 </h2>
                 <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: muted }}>
-                  Closed-loop observability, agent configuration management, and autonomous prompt optimization powered by Google Cloud & Vertex AI.
+                  Native BigQuery ML Remote Model Architecture (Explore Assistant Pattern) &bull; Looker Core 4.0 API &bull; Vertex AI Gemini 3.8 Flash
                 </p>
               </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '14px' }}>
+              <span style={{ backgroundColor: isDarkMode ? '#1e3a8a' : '#dbeafe', color: isDarkMode ? '#93c5fd' : '#1e40af', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
+                ⚡ Native Looker SQL Execution
+              </span>
+              <span style={{ backgroundColor: isDarkMode ? '#064e3b' : '#dcfce7', color: isDarkMode ? '#6ee7b7' : '#166534', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
+                🔒 Zero External Microservices / Zero IAP Blocks
+              </span>
+              <span style={{ backgroundColor: isDarkMode ? '#4c1d95' : '#f3e8ff', color: isDarkMode ? '#c4b5fd' : '#6b21a8', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
+                🏛️ BigQuery Cloud Resource Connection (vertex_conn_us)
+              </span>
+              <span style={{ backgroundColor: isDarkMode ? '#78350f' : '#fef3c7', color: isDarkMode ? '#fde68a' : '#92400e', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600' }}>
+                🚀 Vertex AI gemini-3.8-flash Remote Model
+              </span>
             </div>
           </div>
 
           {/* End-to-End Pipeline Visualization */}
           <div style={{ backgroundColor: cardBg, borderRadius: '12px', border: `1px solid ${border}`, padding: '24px' }}>
             <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: '700', color: text }}>
-              🔄 End-to-End Optimization Lifecycle
+              🔄 End-to-End Optimization Lifecycle (Explore Assistant Pattern)
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               {[
                 {
                   step: '1',
                   title: 'Telemetry Ingestion',
-                  desc: 'Looker Core system__activity conversations_feedback explore captures live user prompts, latency, health status, and ratings.',
+                  desc: 'Looker Core system__activity conversations_feedback captures live user prompts, latency, health status, and ratings.',
                   icon: '📥',
                   color: '#3b82f6'
                 },
                 {
                   step: '2',
                   title: 'Agent Introspection',
-                  desc: 'Looker Core 4.0 API extracts system instructions, linked LookML explores, code interpreter flags, and golden queries.',
+                  desc: 'Looker Core 4.0 API extracts system instructions, linked LookML explores, code interpreter settings, and telemetry history.',
                   icon: '🔍',
                   color: '#8b5cf6'
                 },
                 {
                   step: '3',
-                  title: 'Secure OIDC Proxy',
-                  desc: 'Extension SDK obtains Google OAuth 2.0 ID Token and securely relays telemetry through Looker fetchProxy/serverProxy.',
-                  icon: '🔐',
+                  title: 'BQML SQL Synthesis',
+                  desc: 'Extension formats agent prompt instructions and negative telemetry into a native BigQuery ML.GENERATE_TEXT query.',
+                  icon: '⚡',
                   color: '#f59e0b'
                 },
                 {
                   step: '4',
-                  title: 'Vertex AI Reasoning',
-                  desc: 'Cloud Run service invokes Gemini 2.5 Flash to diagnose query degradation, calculate precision scores, and draft prompt refinements.',
+                  title: 'Vertex AI Remote Model',
+                  desc: 'BigQuery executes ML.GENERATE_TEXT via Cloud Resource connection (vertex_conn_us) targeting Gemini 3.8 Flash over Looker Core SQL.',
                   icon: '🧠',
                   color: '#10b981'
                 },
                 {
                   step: '5',
                   title: '1-Click Looker Sync',
-                  desc: 'Validated prompt instructions and explore mappings are written directly back into Looker via the Core 4.0 API.',
+                  desc: 'Diagnosed prompt rewrites and explore suggestions are written directly back into Looker Agent Studio via the Core 4.0 API.',
                   icon: '🚀',
                   color: '#06b6d4'
                 }
@@ -2584,7 +2331,7 @@ export const App = ({ isStandalone = false }) => {
                 Autonomous reasoning engine that analyzes telemetry failure modes and drafts targeted instruction refinements.
               </p>
               <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
-                <strong>Data Source & Engine:</strong> Google Cloud Run &bull; Vertex AI (Gemini 2.5 Flash)
+                <strong>Data Source & Engine:</strong> BigQuery ML <code>ML.GENERATE_TEXT</code> &bull; Vertex AI Remote Model (<code>gemini-3.8-flash</code>)
               </div>
               <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
                 <strong>Data Generated & Displayed:</strong>
@@ -2598,7 +2345,7 @@ export const App = ({ isStandalone = false }) => {
                 </ul>
               </div>
               <div style={{ fontSize: '12px', color: text }}>
-                <strong>Interactive Controls:</strong> 1-click Google OAuth Sign-In, <em>"Run Autonomous AI Optimization"</em>, and <em>"Apply Suggested Instructions to Agent"</em>.
+                <strong>Interactive Controls:</strong> Looker BigQuery Connection selector, <em>"Run Autonomous AI Optimization"</em>, and <em>"Apply Suggested Instructions to Agent"</em>.
               </div>
             </div>
 
@@ -2616,10 +2363,10 @@ export const App = ({ isStandalone = false }) => {
               <div style={{ fontSize: '12px', color: text, marginBottom: '8px' }}>
                 <strong>Key Specifications Covered:</strong>
                 <ul style={{ margin: '4px 0 0 16px', padding: 0, color: muted, lineHeight: '1.6' }}>
-                  <li><strong>Zero-Trust OAuth 2.0:</strong> Looker Extension SDK integration with Google Cloud IAM.</li>
-                  <li><strong>Cloud Run Security:</strong> <code>--no-allow-unauthenticated</code> enforcement with Google domain validation.</li>
-                  <li><strong>Iframe Sandbox Isolation:</strong> Safe token storage using <code>extensionSDK.localStorage</code>.</li>
-                  <li><strong>Network Routing:</strong> Looker <code>fetchProxy</code> and <code>serverProxy</code> CORS abstraction.</li>
+                  <li><strong>Explore Assistant Pattern:</strong> Native Looker SQL runner execution using <code>create_sql_query</code>.</li>
+                  <li><strong>Serverless BigQuery ML:</strong> Direct Vertex AI inference via BigQuery Cloud Resource Connection.</li>
+                  <li><strong>Zero External Hosting:</strong> No standalone Cloud Run services or IAP authentication proxies needed.</li>
+                  <li><strong>Unified Enterprise Governance:</strong> Governed through standard Looker DB connection permissions.</li>
                 </ul>
               </div>
             </div>
@@ -2634,28 +2381,28 @@ export const App = ({ isStandalone = false }) => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
               <div style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: '16px', borderRadius: '8px', border: `1px solid ${border}` }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px', color: text }}>
-                  🛡️ Google Cloud OAuth 2.0 (OIDC)
+                  🛡️ Looker Database Connection Governance
                 </div>
                 <div style={{ fontSize: '12px', color: muted, lineHeight: '1.5' }}>
-                  The extension uses <code>extensionSDK.oauth2Authenticate</code> to initiate an OpenID Connect flow against <code>accounts.google.com</code>. It retrieves a signed Google <code>id_token</code> without exposing user passwords or long-lived service account keys.
+                  The optimizer executes SQL directly through Looker's managed database connection (<code>default_bigquery_connection</code>). It relies on standard GCP service account credentials configured in Looker Admin—eliminating the need for client-side OAuth popups or user token management.
                 </div>
               </div>
 
               <div style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: '16px', borderRadius: '8px', border: `1px solid ${border}` }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px', color: text }}>
-                  🏢 Enterprise Cloud Run Authorization
+                  🏢 BigQuery Cloud Resource Connection
                 </div>
                 <div style={{ fontSize: '12px', color: muted, lineHeight: '1.5' }}>
-                  The backend service enforces <code>--no-allow-unauthenticated</code>, restricted to <code>domain:google.com</code>. The incoming Bearer <code>id_token</code> is verified cryptographically by Google Cloud Run infrastructure before requests reach Vertex AI.
+                  BigQuery connects to Vertex AI using a Google Cloud Resource Connection (<code>vertex_conn_us</code>). The BigQuery connection service account is granted <code>roles/aiplatform.user</code>, ensuring all LLM inference occurs securely within Google Cloud's private network.
                 </div>
               </div>
 
               <div style={{ backgroundColor: isDarkMode ? '#0f172a' : '#f8fafc', padding: '16px', borderRadius: '8px', border: `1px solid ${border}` }}>
                 <div style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px', color: text }}>
-                  🗄️ Extension Sandbox Storage
+                  🗄️ Zero External Microservices (No IAP / CORS)
                 </div>
                 <div style={{ fontSize: '12px', color: muted, lineHeight: '1.5' }}>
-                  To comply with Looker's <code>data:</code> sandboxed iframe policy, tokens are stored via <code>extensionSDK.localStorageSetItem</code> rather than <code>window.localStorage</code>, preventing <code>SecurityError</code> DOM exceptions.
+                  By adopting Looker's official Explore Assistant architecture, external Cloud Run servers and IAP proxies are completely eliminated. All requests stay inside Looker Core API boundaries, ensuring seamless execution across sandboxed iframes.
                 </div>
               </div>
             </div>
@@ -2702,10 +2449,10 @@ export const App = ({ isStandalone = false }) => {
                     <td style={{ padding: '12px 16px', color: muted }}>conversation_id, user_message</td>
                   </tr>
                   <tr>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>/api/optimize-agent (Cloud Run)</td>
-                    <td style={{ padding: '12px 16px' }}>Looker fetchProxy (HTTPS)</td>
-                    <td style={{ padding: '12px 16px' }}>Gemini 2.5 Flash optimization</td>
-                    <td style={{ padding: '12px 16px', color: muted }}>Bearer id_token, agentConfig, telemetryRows</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace' }}>create_sql_query / run_sql_query (BigQuery ML)</td>
+                    <td style={{ padding: '12px 16px' }}>Looker Core 4.0 SQL API</td>
+                    <td style={{ padding: '12px 16px' }}>Vertex AI Gemini 3.8 Flash optimization</td>
+                    <td style={{ padding: '12px 16px', color: muted }}>connection_name: default_bigquery_connection, ML.GENERATE_TEXT(MODEL ...)</td>
                   </tr>
                 </tbody>
               </table>
