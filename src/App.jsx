@@ -2002,7 +2002,6 @@ export const App = ({ isStandalone = false }) => {
                       }}
                     >
                       <span>⚡ BigQuery ML</span>
-                      <span style={{ fontSize: '10px', opacity: 0.8 }}>(Explore Assistant Pattern)</span>
                     </button>
                     <button
                       onClick={() => setOptimizerBackend('cloud_run')}
