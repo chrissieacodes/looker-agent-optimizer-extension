@@ -1038,6 +1038,7 @@ export const App = ({ isStandalone = false }) => {
           { id: 'analytics', label: '📊 Analytics & Feedback' },
           { id: 'details', label: '⚙️ Agent Details & Live Preview' },
           { id: 'actions', label: '✨ AI Optimizer & Recommendations' },
+          { id: 'evals', label: '🧪 Evals' },
           { id: 'architecture', label: '🏛️ Data Architecture' }
         ].map(tab => (
           <button
@@ -2393,6 +2394,42 @@ export const App = ({ isStandalone = false }) => {
           )}
         </div>
       )}
+
+      {/* TAB: Evals Placeholder */}
+      {activeTab === 'evals' && (
+        <div style={{
+          backgroundColor: cardBg,
+          borderRadius: '12px',
+          border: `1px solid ${border}`,
+          padding: '48px 24px',
+          textAlign: 'center',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+        }}>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🧪</div>
+          <h2 style={{ margin: '0 0 10px 0', fontSize: '22px', fontWeight: '700', color: text }}>
+            Looker Agent Evaluations
+          </h2>
+          <p style={{ margin: '0 auto', maxWidth: '560px', fontSize: '15px', color: muted, lineHeight: '1.6' }}>
+            This is a placeholder tab for Evals in Looker.
+          </p>
+          <div style={{
+            marginTop: '24px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 16px',
+            borderRadius: '20px',
+            backgroundColor: isDarkMode ? '#1e293b' : '#eff6ff',
+            border: `1px solid ${isDarkMode ? '#334155' : '#bfdbfe'}`,
+            fontSize: '13px',
+            color: primary,
+            fontWeight: '500'
+          }}>
+            <span>🚧</span> Placeholder &bull; Agent benchmarking, evaluation datasets & quality scoring suites
+          </div>
+        </div>
+      )}
+
       {/* TAB 4: Data Architecture & System Guide */}
       {activeTab === 'architecture' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
